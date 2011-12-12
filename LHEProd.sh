@@ -9,6 +9,7 @@
 # Basic Config
 
 queue="1nd"
+SEEDOffset="10000"
 eosBase="root://eoscms//eos/cms/store/lhe/"
 WFDir="WorkFlows/"
 mkdir -p $WFDir
@@ -144,7 +145,7 @@ sub_lhe()
   echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
   echo ' '                                                  >> $submit
   echo 'export INPUT=$1 '                                   >> $submit
-  echo 'SEED=`(expr $INPUT + 10000)`'                       >> $submit
+  echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
   echo ' '                                                  >> $submit
   echo 'source $HOME/EVAL_SH64 '$Release                    >> $submit
   echo ' '                                                  >> $submit
@@ -169,23 +170,54 @@ sub_lhe()
 } 
 
 # ------------------------  WORFLOW(S) STATUS ------------------------------------
-sta_lhe()
+sta_lhe() 
 {
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
     taskID=`(cat $iLHE | awk '{print $3}')`
-    nSubmit=`(cat $iLHE | awk '{print $4}')`
+    nSubmit=`(cat $iLHE | awk '{print $4}')`    
+    lJobs=`(bjobs | grep $taskID | awk '{print $7}' | awk -F "_" '{print $2}')`
     nRun=`(bjobs | grep $taskID | grep "RUN"  | wc | awk '{print $1}')`
     nPend=`(bjobs | grep $taskID | grep "PEND" | wc | awk '{print $1}')`
     parse_config 
+    lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
     nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
 
-    echo "  --> Submitted: $nSubmit /  Running : $nRun /  Pending: $nPend "
-    echo "  --> Finished: $nFiles  /  Failed: $nFailed" 
+
+    echo '  --> Submitted : '$nSubmit' [ Running : '$nRun' / Pending : '$nPend' ]' 
+    echo '  --> Finished  : '$nFiles   
+    echo '  --> Failed    : '$nFailed 
     echo
+
+    if [ $nFailed -gt 0 ] ; then
+      lFailed=""
+      for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do 
+        bJobRP=0 
+        for jRP in $lJobs ; do      
+          if [ "$iJob" == "$jRP" ] ; then
+            bJobRP=1
+          fi
+        done
+        if [ $bJobRP -eq 1 ] ; then
+          SEED=`(expr $iJob + $SEEDOffset)`
+          expFile=$Dataset'_'$SEED'.lhe'
+          bJobF=0
+          for iFile in $lFiles ; do
+            if [ "$iFile" == "$expFile" ] ; then
+              bJobF=1
+            fi
+          done
+          if [ $bJobF -eq 0 ] ; then
+            lFailed=$lFailed' '$iJob
+          fi 
+        fi
+      done
+    fi
+    
+
   done
 }
 
