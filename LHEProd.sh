@@ -141,6 +141,7 @@ sub_lhe()
   cp /dev/null $submit
  
   echo '#!/bin/sh'                                          >> $submit
+  echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
   echo ' '                                                  >> $submit
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + 10000)`'                       >> $submit
