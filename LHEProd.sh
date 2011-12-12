@@ -179,7 +179,7 @@ sta_lhe()
     nRun=`(bjobs | grep $taskID | grep "RUN"  | wc | awk '{print $1}')`
     nPend=`(bjobs | grep $taskID | grep "PEND" | wc | awk '{print $1}')`
     parse_config 
-    nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
+    nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
 
     echo "  --> Submitted: $nSubmit /  Running : $nRun /  Pending: $nPend "
