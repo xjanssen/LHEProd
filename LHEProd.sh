@@ -8,11 +8,16 @@
 
 # Basic Config
 
-queue="1nd"
+queue="2nd"
+email="cmslheprod@gmail.com"
 SEEDOffset="10000"
 eosBase="root://eoscms//eos/cms/store/lhe/"
 WFDir="WorkFlows/"
 mkdir -p $WFDir
+LsfOutDir="LsfOutDir"
+mkdir -p $LsfOutDir
+WorkArea=$HOME"/scratch0/LHEProdWorkArea/"
+mkdir -p $WorkArea
 
 # ------------------------ print_help --------------------------------------------
 print_help()
@@ -26,12 +31,19 @@ Possibilities:
 
   LHEProd.sh -inject -tgz <WebWFFile> : 
        Dowload WorkFlow tarball and submit jobs
+
   LHEProd.sh -submit -dir <WFDir> -lhe <lheID> : 
        Submit lheID WF already dowloaded to WFDir
-  LHEProd.sh -status :
-       Get Status of all LHE ongoing WF
+
+  LHEProd.sh -status [-lhe <lheID>] [-fjlist]:
+       Get Status of all LHE ongoing WF or of lheID WF
+       -fjlist : Get List of failed jobs (be patient)
+
+  LHEProd.sh -resub  [-lhe <lheID>] 
+       Resubmit Failed jobs for all LHE ongoing WF or lheID WF   
+
   LHEProd.sh -close -lhe <lheID> : 
-       Close WorkFlow lheID production
+       Close WorkFlow lheID production if finished
 
 Author: Xavier Janssen <xavier.janssen@cern.ch>
         Dec. 2011 
@@ -64,11 +76,10 @@ parse_config()
   Events=`(echo $cfgline | awk '{print $5}')`
   Dataset=`(echo $cfgline | awk '{print $10}')`
   pyCfg=`(echo $cfgline | awk '{print $13}')`
-  pyCfg=$dir'/'$pyCfg
   eosnum=`(echo $cfgline | awk '{print $14}')`
   eosDir=$eosBase$eosnum
 
-  EvtJob=`(cat $pyCfg | grep maxEvents | grep "cms.untracked.int32" | awk -F"int32" '{print $2}' | sed 's:(::' | sed 's:)::g' | sed 's: ::g')` 
+  EvtJob=`(cat $dir'/'$pyCfg | grep maxEvents | grep "cms.untracked.int32" | awk -F"int32" '{print $2}' | sed 's:(::' | sed 's:)::g' | sed 's: ::g')` 
   nJobs=$(( $Events / $EvtJob )) 
 
   if [ $nJobMax -gt 0 ] ; then
@@ -83,7 +94,7 @@ parse_config()
   echo 'Events/Job : '$EvtJob
   echo '#Jobs      : '$nJobs
   echo 'Dataset    : '$Dataset
-  echo 'pyCfg      : '$pyCfg
+  echo 'pyCfg      : '$dir$pyCfg
   echo 'EOS Dir    : '$eosDir
   echo '---------------------------------------'
   echo
@@ -127,7 +138,7 @@ sub_lhe()
 {
 
   PWD=`pwd`
-  BaseDir=`pwd`'/'$dir'/' 
+  BaseDir=`pwd`'/'$dir 
   lockFile=$BaseDir$requestID'.lock'
   actiFile=$BaseDir$requestID'.active'
   if [ -f $lockFile ] ; then
@@ -136,10 +147,15 @@ sub_lhe()
   fi
 
 
-  LogDir=$BaseDir'LogFiles_'$requestID
+  LogDir=$BaseDir'LogFiles_'$requestID'/'
   mkdir -p $LogDir
-  submit=$BaseDir$requestID'.sub'
+  WFWorkArea=$WorkArea$requestID'/'
+  mkdir -p $WFWorkArea
+  submit=$WFWorkArea$requestID'.sub'
   cp /dev/null $submit
+  cp $dir'/'$pyCfg $WFWorkArea
+
+  subHOST=`hostname`
  
   echo '#!/bin/sh'                                          >> $submit
   echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
@@ -149,20 +165,22 @@ sub_lhe()
   echo ' '                                                  >> $submit
   echo 'source $HOME/EVAL_SH64 '$Release                    >> $submit
   echo ' '                                                  >> $submit
-  echo "cp $PWD/$pyCfg"' temp_${INPUT}.py'                  >> $submit
+  echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'            >> $submit
   echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
-  echo 'cmsRun temp_${INPUT}.py'                            >> $submit 
+  echo 'cmsRun temp_${INPUT}.py &> logFile'                 >> $submit 
   echo ' '                                                  >> $submit
   echo 'ls -l'                                              >> $submit 
   echo ' '                                                  >> $submit
+  echo 'tar czf logFile.tgz logFile'                        >> $submit       
+  echo 'scp -o StrictHostKeyChecking=no logFile.tgz '$subHOST':'$LogDir$Dataset'_${INPUT}.log.tgz'  >> $submit
   echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   chmod +x $submit
 
   iJob=1
   taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
   for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
-    echo bsub -q $queue -o $LogDir/$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-         bsub -q $queue -o $LogDir/$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+    echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+         bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
   done 
   cp /dev/null $lockFile
   cp /dev/null $actiFile
@@ -176,11 +194,17 @@ sta_lhe()
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
+    if [ "$lhein" != "NULL" ] ; then
+      if [ "$lhe" != "$lhein" ] ; then
+        break
+      fi
+    fi
     taskID=`(cat $iLHE | awk '{print $3}')`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
-    lJobs=`(bjobs | grep $taskID | awk '{print $7}' | awk -F "_" '{print $2}')`
-    nRun=`(bjobs | grep $taskID | grep "RUN"  | wc | awk '{print $1}')`
-    nPend=`(bjobs | grep $taskID | grep "PEND" | wc | awk '{print $1}')`
+    lJobs=`(bjobs | grep $taskID'_' | grep "RUN"  | awk '{print $7}' | awk -F "_" '{print $2}')`
+    lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND"  | awk '{print $6}' | awk -F "_" '{print $2}')`
+    nRun=`(bjobs | grep $taskID'_'  | grep "RUN"  | wc | awk '{print $1}')`
+    nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     parse_config 
     lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
     nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
@@ -192,33 +216,84 @@ sta_lhe()
     echo '  --> Failed    : '$nFailed 
     echo
 
-    if [ $nFailed -gt 0 ] ; then
-      lFailed=""
-      for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do 
-        bJobRP=0 
-        for jRP in $lJobs ; do      
-          if [ "$iJob" == "$jRP" ] ; then
-            bJobRP=1
-          fi
-        done
-        if [ $bJobRP -eq 1 ] ; then
-          SEED=`(expr $iJob + $SEEDOffset)`
-          expFile=$Dataset'_'$SEED'.lhe'
-          bJobF=0
-          for iFile in $lFiles ; do
-            if [ "$iFile" == "$expFile" ] ; then
-              bJobF=1
-            fi
-          done
-          if [ $bJobF -eq 0 ] ; then
-            lFailed=$lFailed' '$iJob
-          fi 
-        fi
-      done
-    fi
-    
+    if [ $FindFailedJob -eq 1 ] ; then
+     echo '  --> Getting list of failed Jobs (be patient ....)' 
+     if [ $nFailed -gt 0 ] ; then
+       lFailed=""
+       for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do 
+         bJobRP=0 
+         for jRP in $lJobs ; do      
+           if [ "$iJob" == "$jRP" ] ; then
+             bJobRP=1
+           fi
+         done
+         if [ $bJobRP -eq 0 ] ; then
+           SEED=`(expr $iJob + $SEEDOffset)`
+           expFile=$Dataset'_'$SEED'.lhe'
+           bJobF=0
+           for iFile in $lFiles ; do
+             if [ "$iFile" == "$expFile" ] ; then
+               bJobF=1
+             fi
+           done
+           if [ $bJobF -eq 0 ] ; then
+             lFailed=$lFailed' '$iJob
+           fi 
+         fi
+       done
+       echo '  --> Failed Job(s) : ' $lFailed
+       echo
+     fi
+    fi   
 
   done
+}
+
+# ------------------------ RESUBMIT FAILED JOBS -----------------------------------
+
+resub_lhe()
+{
+  lheact=$lhein
+  activeLHE=`(find . | grep ".active")`
+  for iLHE in $activeLHE ; do
+    dir=`(cat $iLHE | awk '{print $1}')`
+    lhe=`(cat $iLHE | awk '{print $2}')`
+    taskID=`(cat $iLHE | awk '{print $3}')`
+    if [ "$lhein" != "NULL" ] ; then
+      if [ "$lhe" != "$lheact" ] ; then
+        break
+      fi
+    fi
+    lhein=$lhe
+    FindFailedJob=1
+    sta_lhe 
+    echo -en "[LHEProd::Inject] INFO : Do you want to re-submit this WorkFlow ? [y/n] "
+    read a
+    if [ "$a" == "y" ] ; then
+      WFWorkArea=$WorkArea$requestID'/'
+      submit=$WFWorkArea$requestID'.sub'
+      for iJob in $lFailed ; do
+        echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+             bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+      done
+    fi
+  done
+}
+
+# ------------------------ Move Logs Out of afs -----------------------------------
+clean_afs_log()
+{
+  activeLHE=`(find . | grep ".active")`
+  for iLHE in $activeLHE ; do
+    dir=`(cat $iLHE | awk '{print $1}')`
+    lhe=`(cat $iLHE | awk '{print $2}')`
+    parse_config 
+    WFWorkArea=$WorkArea$requestID'/'
+    BaseDir=`pwd`'/'$dir
+    LogDir=$BaseDir'LogFiles_'$requestID'/'
+    mv $WFWorkArea/*.out $LogDir
+  done
+  mv $HOME/LSFJOB_* $LsfOutDir
 }
 
 # ------------------------ CLOSE WORFLOW ------------------------------------------
@@ -235,7 +310,7 @@ close_lhe()
   for iLHE in $activeLHE ; do
     tmpdir=`(cat $iLHE | awk '{print $1}')`
     tmplhe=`(cat $iLHE | awk '{print $2}')`
-    if [ "$tmplhe" == "$lhe" ] ; then
+    if [ "$tmplhe" == "$lhein" ] ; then
       dir=$tmpdir
       Found=1
       actiFile=$iLHE
@@ -261,26 +336,33 @@ close_lhe()
 
 tgz="NULL"
 dir="NULL"
-lhe="NULL"
+lhein="NULL"
 sub=0
+resub=0
 sta=0
 inj=0
 clo=0
+cleanlog=0
 
 nJobMax=0
 iJobStart=1
+
+FindFailedJob=0
 
 for arg in $* ; do
   case $arg in
     -tgz)    tgz=$2        ; shift ; shift ;;
     -dir)    dir=$2        ; shift ; shift ;;
-    -lhe)    lhe=$2        ; shift ; shift ;;
+    -lhe)    lhein=$2      ; shift ; shift ;;
     -inject) inj=1                 ; shift ;;
     -submit) sub=1                 ; shift ;;
-    -status) sta=1                 ; shift ;;
-    -close)  clo=1                 ; shift ;;
     -njmax)  nJobMax=$2    ; shift ; shift ;;
     -jstart) iJobStart=$2  ; shift ; shift ;;
+    -resub)  resub=1               ; shift ;;
+    -status) sta=1                 ; shift ;;
+    -fjlist) FindFailedJob=1       ; shift ;;
+    -cleanlog) cleanlog=1          ; shift ;;
+    -close)  clo=1                 ; shift ;;
     -h)      print_help                    ;;
   esac
 done
@@ -294,12 +376,23 @@ fi
 
 if [ $sub -eq 1 ] ; then
   parse_config
+  lhe=$lhein
   sub_lhe
+  exit
+fi
+
+if [ $resub -eq 1 ] ; then
+  resub_lhe
   exit
 fi
 
 if [ $sta -eq 1 ] ; then
   sta_lhe
+  exit
+fi
+
+if [ $cleanlog -eq 1 ] ; then
+  clean_afs_log
   exit
 fi
 
