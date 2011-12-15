@@ -35,12 +35,22 @@ Possibilities:
   LHEProd.sh -submit -dir <WFDir> -lhe <lheID> : 
        Submit lheID WF already dowloaded to WFDir
 
+  LHEProd.sh -resub  [-lhe <lheID>] 
+       Resubmit Failed jobs for all LHE ongoing WF or lheID WF   
+
+  LHEProd.sh -addjob <#job> -lhe <lheID>
+       Submit <#job> extra jobs for <lheID> WF
+
   LHEProd.sh -status [-lhe <lheID>] [-fjlist]:
        Get Status of all LHE ongoing WF or of lheID WF
        -fjlist : Get List of failed jobs (be patient)
 
-  LHEProd.sh -resub  [-lhe <lheID>] 
-       Resubmit Failed jobs for all LHE ongoing WF or lheID WF   
+  LHEProd.sh -chknevt [-lhe <lheID>]
+       Check # produced events for all LHE ongoing WF or lheID WF
+       (This is taking quite long time .... )
+
+  LHEProd.sh -cleanlog
+       Clean AFS temporary logfile location 
 
   LHEProd.sh -close -lhe <lheID> : 
        Close WorkFlow lheID production if finished
@@ -139,13 +149,15 @@ sub_lhe()
 
   PWD=`pwd`
   BaseDir=`pwd`'/'$dir 
-  lockFile=$BaseDir$requestID'.lock'
-  actiFile=$BaseDir$requestID'.active'
+  lockFile=$BaseDir'/'$requestID'.lock'
+  actiFile=$BaseDir'/'$requestID'.active'
+  echo $lockFile
   if [ -f $lockFile ] ; then
     echo '[LHEProd.sh::Submit] ERROR lockFile exist:' $lockFile
     exit
   fi
 
+  exit
 
   LogDir=$BaseDir'LogFiles_'$requestID'/'
   mkdir -p $LogDir
@@ -176,7 +188,6 @@ sub_lhe()
   echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   chmod +x $submit
 
-  iJob=1
   taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
   for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
     echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
@@ -190,6 +201,21 @@ sub_lhe()
 # ------------------------  WORFLOW(S) STATUS ------------------------------------
 sta_lhe() 
 {
+
+
+  echo  
+  echo "--------------------------------------------------------------------"
+  echo "   Last Update    : "`date`
+  echo "   Worknode       : "`hostname`
+  diskA=`(df -h . | grep -v Use | awk '{print $4}')`    
+  diskU=`(df -h . | grep -v Use | awk '{print $5}')`    
+  echo "   Disk Free Space: $diskA ($diskU Use)   "
+  load=`(uptime | awk -F"load average:" '{print "    Load average    :"$2}' )`
+  echo "  "$load  
+  echo "--------------------------------------------------------------------"
+  echo
+   
+
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
@@ -209,7 +235,9 @@ sta_lhe()
     lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
     nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
-
+    if [ $nFailed -lt 0 ] ; then
+      nFailed=0
+    fi
 
     echo '  --> Submitted : '$nSubmit' [ Running : '$nRun' / Pending : '$nPend' ]' 
     echo '  --> Finished  : '$nFiles   
@@ -249,6 +277,43 @@ sta_lhe()
   done
 }
 
+
+# ------------------------ Check #evt ---------------------------------------------
+check_nevt()
+{
+
+  lheact=$lhein
+  activeLHE=`(find . | grep ".active")`
+  for iLHE in $activeLHE ; do
+    dir=`(cat $iLHE | awk '{print $1}')`
+    lhe=`(cat $iLHE | awk '{print $2}')`
+    if [ "$lheact" != "NULL" ] ; then
+      if [ "$lhe" != "$lheact" ] ; then
+        break
+      fi
+    fi
+    lhein=$lhe
+    parse_config 
+    lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}')`
+    echo "Checking Files (be patient ....):"
+    echo
+    nEvtTot=0 
+    for iFile in $lFiles ; do
+      nEvtFile=`(xrd eoscms cat $iFile | grep "<event>" | wc | awk '{print $1}')`
+      nEvtTot=`(expr $nEvtTot + $nEvtFile)` 
+      if [ "$EvtJob" != "$nEvtFile" ] ; then
+        echo $iFile ' --> Missing Events ( #evt/File : '$nEvtFile' )'
+      fi
+    done
+    echo
+    echo ' ---> Total #Events Produced = '$nEvtTot
+    if [ $nEvtTot -lt $Events ] ; then
+    echo '     ---> MISSING EVENTS !!!!'     
+    echo
+    fi
+  done
+}
+
 # ------------------------ RESUBMIT FAILED JOBS -----------------------------------
 
 resub_lhe()
@@ -259,7 +324,7 @@ resub_lhe()
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
     taskID=`(cat $iLHE | awk '{print $3}')`
-    if [ "$lhein" != "NULL" ] ; then
+    if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
         break
       fi
@@ -280,6 +345,43 @@ resub_lhe()
   done
 }
 
+# ------------------------ Add jobs to LHE WF -------------------------------------
+
+add_lhejob()
+{
+
+  if [ "$lhein" == "NULL" ] ; then
+    echo "[LHEProd::AddJob] ERROR: <lheID> not specified "
+    exit
+  fi 
+
+  lheact=$lhein 
+  activeLHE=`(find . | grep ".active")`
+  for iLHE in $activeLHE ; do
+    lhe=`(cat $iLHE | awk '{print $2}')`
+    if [ "$lhe" != "$lheact" ] ; then
+      break
+    fi
+    lhein=$lhe
+    dir=`(cat $iLHE | awk '{print $1}')`
+    taskID=`(cat $iLHE | awk '{print $3}')`
+    parse_config
+    nJobs=`(cat $iLHE | awk '{print $4}')`
+    WFWorkArea=$WorkArea$requestID'/'
+    submit=$WFWorkArea$requestID'.sub'
+
+    # New Start / Stop range
+    iJobStart=`(expr $nJobs + 1)`
+    nJobs=`(expr $nJobs + $addjob )`
+    for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
+      echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+           bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+    done 
+    echo $dir $lhe $taskID $nJobs > $iLHE
+
+  done
+}
+
 # ------------------------ Move Logs Out of afs -----------------------------------
 clean_afs_log()
 {
@@ -287,6 +389,7 @@ clean_afs_log()
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
+    lhein=$lhe
     parse_config 
     WFWorkArea=$WorkArea$requestID'/'
     BaseDir=`pwd`'/'$dir
@@ -339,10 +442,12 @@ dir="NULL"
 lhein="NULL"
 sub=0
 resub=0
+addjob=0
 sta=0
 inj=0
 clo=0
 cleanlog=0
+chknevt=0
 
 nJobMax=0
 iJobStart=1
@@ -359,8 +464,10 @@ for arg in $* ; do
     -njmax)  nJobMax=$2    ; shift ; shift ;;
     -jstart) iJobStart=$2  ; shift ; shift ;;
     -resub)  resub=1               ; shift ;;
+    -addjob) addjob=$2     ; shift ; shift ;;
     -status) sta=1                 ; shift ;;
     -fjlist) FindFailedJob=1       ; shift ;;
+    -chknevt) chknevt=1            ; shift ;;
     -cleanlog) cleanlog=1          ; shift ;;
     -close)  clo=1                 ; shift ;;
     -h)      print_help                    ;;
@@ -375,8 +482,8 @@ if [ $inj -eq 1 ] ; then
 fi
 
 if [ $sub -eq 1 ] ; then
-  parse_config
   lhe=$lhein
+  parse_config
   sub_lhe
   exit
 fi
@@ -386,8 +493,18 @@ if [ $resub -eq 1 ] ; then
   exit
 fi
 
+if [ $addjob -gt 0 ] ; then
+  add_lhejob
+  exit
+fi
+
 if [ $sta -eq 1 ] ; then
   sta_lhe
+  exit
+fi
+
+if [ $chknevt -eq 1 ] ; then
+  check_nevt
   exit
 fi
 
