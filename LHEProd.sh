@@ -77,7 +77,7 @@ parse_config()
   fi
 
   # Get LHE config line
-  grep $lhe $cfg -q &&  cfgline=`(cat $cfg | grep $lhe)` || exit  
+  grep $lhein $cfg -q &&  cfgline=`(cat $cfg | grep $lhein)` || exit  
 
   # Decode info
   
@@ -132,7 +132,7 @@ inj_lhe()
   dir=$WFDir`(echo $WFFile | awk -F".tgz" '{print $1}')`
   AllLHE=`(cat $dir/summary.txt | grep -v "request" | grep -v "Total evts" | awk '{print $1}')`
   for iLHE in $AllLHE ; do
-    lhe=$iLHE
+    lhein=$iLHE
     parse_config 
     echo -en "[LHEProd::Inject] INFO : Do you want to submit this WorkFlow ? [y/n] "
     read a
@@ -195,7 +195,7 @@ sub_lhe()
   done 
   cp /dev/null $lockFile
   cp /dev/null $actiFile
-  echo $dir $lhe $taskID $nJobs >> $actiFile
+  echo $dir $lhein $taskID $nJobs >> $actiFile
 } 
 
 # ------------------------  WORFLOW(S) STATUS ------------------------------------
@@ -215,16 +215,17 @@ sta_lhe()
   echo "--------------------------------------------------------------------"
   echo
    
-
+  lheact=$lhein 
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
-    if [ "$lhein" != "NULL" ] ; then
-      if [ "$lhe" != "$lhein" ] ; then
+    if [ "$lheact" != "NULL" ] ; then
+      if [ "$lhe" != "$lheact" ] ; then
         break
       fi
     fi
+    lhein=$lhe
     taskID=`(cat $iLHE | awk '{print $3}')`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
     lJobs=`(bjobs | grep $taskID'_' | grep "RUN"  | awk '{print $7}' | awk -F "_" '{print $2}')`
@@ -402,7 +403,7 @@ clean_afs_log()
 # ------------------------ CLOSE WORFLOW ------------------------------------------
 close_lhe()
 {
-  if [ "$lhe" == "NULL" ] ; then
+  if [ "$lhein" == "NULL" ] ; then
     echo '[LHEProd::Close] ERROR lhe not specified'
     exit
   fi
@@ -411,22 +412,24 @@ close_lhe()
   activeLHE=`(find . | grep ".active")`
   Found=0
   for iLHE in $activeLHE ; do
-    tmpdir=`(cat $iLHE | awk '{print $1}')`
-    tmplhe=`(cat $iLHE | awk '{print $2}')`
-    if [ "$tmplhe" == "$lhein" ] ; then
-      dir=$tmpdir
+    dir=`(cat $iLHE | awk '{print $1}')`
+    lhe=`(cat $iLHE | awk '{print $2}')`
+    if [ "$lhe" == "$lhein" ] ; then
       Found=1
       actiFile=$iLHE
     fi
   done
 
   if [ $Found -eq 0 ] ; then
-    echo '[LHEProd::Close] ERROR lhe not in active WF: '$lhe
+    echo '[LHEProd::Close] ERROR lhe not in active WF: '$lhein
     exit
   fi
 
   # Check Status
   echo '[LHEProd::Close] Not Implemented !!!!'
+  sta_lhe
+  
+
 }
 
 #----------------------------------------------------------------------------------
