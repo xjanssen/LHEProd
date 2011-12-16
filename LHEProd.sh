@@ -8,7 +8,8 @@
 
 # Basic Config
 
-queue="2nd"
+queue="cmst0"
+chkqueue='1nd'
 email="cmslheprod@gmail.com"
 SEEDOffset="10000"
 eosBase="root://eoscms//eos/cms/store/lhe/"
@@ -157,9 +158,14 @@ sub_lhe()
     exit
   fi
 
-  exit
+  echo -en "[LHEProd::Submit] INFO : Do you want to submit this WorkFlow ? [y/n] "
+  read a
+  case $a in
+    y) echo "... Submitting ..." ;;
+    *) exit ;;
+  esac 
 
-  LogDir=$BaseDir'LogFiles_'$requestID'/'
+  LogDir=$BaseDir'/LogFiles_'$requestID'/'
   mkdir -p $LogDir
   WFWorkArea=$WorkArea$requestID'/'
   mkdir -p $WFWorkArea
@@ -179,11 +185,11 @@ sub_lhe()
   echo ' '                                                  >> $submit
   echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'            >> $submit
   echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
-  echo 'cmsRun temp_${INPUT}.py &> logFile'                 >> $submit 
+  echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
   echo ' '                                                  >> $submit
   echo 'ls -l'                                              >> $submit 
   echo ' '                                                  >> $submit
-  echo 'tar czf logFile.tgz logFile'                        >> $submit       
+  echo 'tar czf logFile.tgz '$Dataset'_${INPUT}.log'        >> $submit       
   echo 'scp -o StrictHostKeyChecking=no logFile.tgz '$subHOST':'$LogDir$Dataset'_${INPUT}.log.tgz'  >> $submit
   echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   chmod +x $submit
@@ -205,16 +211,21 @@ sta_lhe()
 
   echo  
   echo "--------------------------------------------------------------------"
-  echo "   Last Update    : "`date`
-  echo "   Worknode       : "`hostname`
+  echo '   Last Update    : '`date`
+  echo '   Worknode       : '`hostname`
   diskA=`(df -h . | grep -v Use | awk '{print $4}')`    
   diskU=`(df -h . | grep -v Use | awk '{print $5}')`    
-  echo "   Disk Free Space: $diskA ($diskU Use)   "
-  load=`(uptime | awk -F"load average:" '{print "    Load average    :"$2}' )`
-  echo "  "$load  
+  echo '   Disk Free Space: '$diskA "($diskU Use)   "
+  load=`(uptime | awk -F"load average:" '{print $2}' )`
+  echo '   Load average   :'$load  
+  echo "--------------------------------------------------------------------"
+  nRunTot=`(bjobs  | grep "RUN"  | wc | awk '{print $1}')`
+  nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
+  echo '   # Runing  Jobs : '$nRunTot 
+  echo '   # Pending Jobs : '$nPendTot 
   echo "--------------------------------------------------------------------"
   echo
-   
+
   lheact=$lhein 
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
@@ -222,7 +233,7 @@ sta_lhe()
     lhe=`(cat $iLHE | awk '{print $2}')`
     if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
-        break
+        continue
       fi
     fi
     lhein=$lhe
@@ -288,30 +299,55 @@ check_nevt()
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
+    taskID=`(cat $iLHE | awk '{print $3}')`
     if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
-        break
+        continue 
       fi
     fi
     lhein=$lhe
     parse_config 
-    lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}')`
-    echo "Checking Files (be patient ....):"
-    echo
-    nEvtTot=0 
-    for iFile in $lFiles ; do
-      nEvtFile=`(xrd eoscms cat $iFile | grep "<event>" | wc | awk '{print $1}')`
-      nEvtTot=`(expr $nEvtTot + $nEvtFile)` 
-      if [ "$EvtJob" != "$nEvtFile" ] ; then
-        echo $iFile ' --> Missing Events ( #evt/File : '$nEvtFile' )'
-      fi
-    done
-    echo
-    echo ' ---> Total #Events Produced = '$nEvtTot
-    if [ $nEvtTot -lt $Events ] ; then
-    echo '     ---> MISSING EVENTS !!!!'     
-    echo
-    fi
+
+    BaseDir=`pwd`'/'$dir
+    LogDir=$BaseDir'/LogFiles_'$requestID'/'
+    mkdir -p $LogDir
+    WFWorkArea=$WorkArea$requestID'/'
+    mkdir -p $WFWorkArea
+    submit=$WFWorkArea$requestID'.checknevt.sub'
+    cp /dev/null $submit
+    chmod +x $submit 
+    subHOST=`hostname`
+
+    echo '#!/bin/sh'                                          >> $submit
+    echo ' '                                                  >> $submit
+    echo 'lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/'$eosnum' | grep '$Dataset' | grep eos | awk '\''{print $5}'\'')`'  >> $submit
+    echo ' '                                                  >> $submit
+    echo 'logFile='$requestID'.checknevt.log'                 >> $submit
+    echo 'cp /dev/null $logFile'                              >> $submit
+    echo 'echo " " >> $logFile '                              >> $submit
+    echo 'echo "Checking #Evt/File for WF: '$requestID' ('$Dataset')" >> $logFile' >> $submit 
+    echo 'echo " " >> $logFile '                                  >> $submit
+    echo 'nEvtTot=0'                                          >> $submit  
+    echo 'for iFile in $lFiles ; do'                          >> $submit
+    echo '  nEvtFile=`(xrd eoscms cat $iFile | grep "<event>" | wc | awk '\''{print $1}'\'')`' >> $submit
+    echo '  nEvtTot=`(expr $nEvtTot + $nEvtFile)`'            >> $submit
+    echo '  if [ "'$EvtJob'" != "$nEvtFile" ] ; then'         >> $submit
+    echo '    echo "$iFile --> Missing Events ( #evt/File : $nEvtFile / '$EvtJob' )" >> $logFile' >> $submit
+    echo '  fi'                                               >> $submit 
+    echo 'done'                                               >> $submit  
+    echo 'echo " " >> $logFile '                                  >> $submit
+    echo 'echo " ---> Total #Events Produced = $nEvtTot / '$Events'">> $logFile'    >> $submit
+    echo 'if [ $nEvtTot -lt '$Events' ] ; then'               >> $submit
+    echo '  echo " ---> MISSING EVENTS !!!!" >> $logFile'     >> $submit
+    echo 'fi'                                                 >> $submit 
+    echo ' '                                                  >> $submit
+    echo 'mail '$email' -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
+    echo 'scp -o StrictHostKeyChecking=no $logFile '$subHOST':'$LogDir  >> $submit
+    
+    #echo $submit
+    #bsub -u $email -q $chkqueue -o $WFWorkArea$Dataset'_'$taskID'_'chkevt.out -J ChkEv$taskID $submit 
+    nohup $submit &> /dev/null &
+
   done
 }
 
@@ -327,7 +363,7 @@ resub_lhe()
     taskID=`(cat $iLHE | awk '{print $3}')`
     if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
-        break
+        continue
       fi
     fi
     lhein=$lhe
@@ -361,7 +397,7 @@ add_lhejob()
   for iLHE in $activeLHE ; do
     lhe=`(cat $iLHE | awk '{print $2}')`
     if [ "$lhe" != "$lheact" ] ; then
-      break
+      continue
     fi
     lhein=$lhe
     dir=`(cat $iLHE | awk '{print $1}')`
@@ -386,15 +422,22 @@ add_lhejob()
 # ------------------------ Move Logs Out of afs -----------------------------------
 clean_afs_log()
 {
+  lheact=$lhein
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
+    if [ "$lheact" != "NULL" ] ; then
+      if [ "$lhe" != "$lheact" ] ; then
+        continue
+      fi
+    fi
     lhein=$lhe
     parse_config 
     WFWorkArea=$WorkArea$requestID'/'
     BaseDir=`pwd`'/'$dir
-    LogDir=$BaseDir'LogFiles_'$requestID'/'
+    LogDir=$BaseDir'/LogFiles_'$requestID'/'
+    mkdir -p $LogDir
     mv $WFWorkArea/*.out $LogDir
   done
   mv $HOME/LSFJOB_* $LsfOutDir
@@ -426,9 +469,26 @@ close_lhe()
   fi
 
   # Check Status
-  echo '[LHEProd::Close] Not Implemented !!!!'
   sta_lhe
-  
+
+  echo -en "[LHEProd::Close] INFO : Do you want to close this WorkFlow ? [y/n] "
+  read a
+  case $a in
+    y) echo "... Closing WF ..." ;;
+    *) exit ;;
+  esac 
+
+
+  doneFile=`(echo $actiFile | sed "s:active:done:")`
+  mv $actiFile $doneFile
+  sleep 5
+  clean_afs_log &> /dev/null
+  WFWorkArea=$WorkArea$requestID'/'
+  mv $WFWorkArea $dir'/WorkArea_'$requestID 
+
+  echo 
+  echo "Please Update PREP Status as well"
+  echo
 
 }
 
