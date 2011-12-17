@@ -343,7 +343,9 @@ check_nevt()
     echo ' '                                                  >> $submit
     echo 'mail '$email' -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
     echo 'scp -o StrictHostKeyChecking=no $logFile '$subHOST':'$LogDir  >> $submit
-    
+   
+    echo '... Running file check in bkgd ... you will receive an email ...' 
+ 
     #echo $submit
     #bsub -u $email -q $chkqueue -o $WFWorkArea$Dataset'_'$taskID'_'chkevt.out -J ChkEv$taskID $submit 
     nohup $submit &> /dev/null &
