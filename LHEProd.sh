@@ -220,9 +220,11 @@ sta_lhe()
   echo '   Load average   :'$load  
   echo "--------------------------------------------------------------------"
   nRunTot=`(bjobs  | grep "RUN"  | wc | awk '{print $1}')`
+  nRunQDet=`(bjobs  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
   nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
-  echo '   # Runing  Jobs : '$nRunTot 
-  echo '   # Pending Jobs : '$nPendTot 
+  nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+  echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
+  echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
   echo "--------------------------------------------------------------------"
   echo
 
@@ -260,6 +262,19 @@ sta_lhe()
      echo '  --> Getting list of failed Jobs (be patient ....)' 
      if [ $nFailed -gt 0 ] ; then
        lFailed=""
+
+#       expjoblist=`(mktemp)`
+#       for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do
+#         echo $iJob >> $epxjoblist
+#       done 
+#       subjoblist=`(mktemp)`
+#       for jRP in $lJobs ; do
+#         echo $jRP >> $subjoblist
+#       done    
+#
+#       rm $expjoblist  
+#       rm $subjoblist
+
        for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do 
          bJobRP=0 
          for jRP in $lJobs ; do      
@@ -281,6 +296,7 @@ sta_lhe()
            fi 
          fi
        done
+
        echo '  --> Failed Job(s) : ' $lFailed
        echo
      fi
