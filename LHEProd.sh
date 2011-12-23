@@ -9,6 +9,7 @@
 # Basic Config
 
 queue="cmst0"
+#queue="1nw"
 chkqueue='1nd'
 email="cmslheprod@gmail.com"
 SEEDOffset="10000"
