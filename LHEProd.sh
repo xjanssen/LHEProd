@@ -8,18 +8,40 @@
 
 # Basic Config
 
-queue="cmst0"
-#queue="1nw"
-chkqueue='1nd'
 email="cmslheprod@gmail.com"
 SEEDOffset="10000"
-eosBase="root://eoscms//eos/cms/store/lhe/"
 WFDir="WorkFlows/"
 mkdir -p $WFDir
-LsfOutDir="LsfOutDir"
-mkdir -p $LsfOutDir
-WorkArea=$HOME"/scratch0/LHEProdWorkArea/"
-mkdir -p $WorkArea
+
+# Get Site
+Site=`(uname -a | awk '{print $2}' | awk -F'.' '{print $2}')`
+
+# Site Config: CERN
+if   [ "$Site" == "cern" ] ; then
+
+  queue="cmst0"
+  chkqueue='1nd'
+  eosBase="root://eoscms//eos/cms/store/lhe/"
+  LsfOutDir="LsfOutDir"
+  mkdir -p $LsfOutDir
+  WorkArea=$HOME"/scratch0/LHEProdWorkArea/"
+  mkdir -p $WorkArea
+
+# Site Config: FNAL
+elif [ "$Site" == "fnal" ] ; then
+
+  fnaluser='xjanssen'
+  eosBase="root://cmseos:1094//eos/uscms/store/lhe/"
+  WorkArea="/storage/local/data1/cmsdataops/lhe/LHEProdWorkArea/"
+  mkdir -p $WorkArea
+
+# Site Config: Unknown ?
+else
+
+  echo "[LHEProd] ERROR: Unknown Site : " $Site 
+  exit
+
+fi
 
 # ------------------------ print_help --------------------------------------------
 print_help()
@@ -177,29 +199,86 @@ sub_lhe()
   subHOST=`hostname`
  
   echo '#!/bin/sh'                                          >> $submit
-  echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
+# echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
   echo ' '                                                  >> $submit
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
   echo ' '                                                  >> $submit
-  echo 'source $HOME/EVAL_SH64 '$Release                    >> $submit
+  if [ "$Site" == "fnal" ] ; then
+    echo 'export SCRAM_ARCH=slc5_amd64_gcc434'              >> $submit
+    echo 'source /uscmst1/prod/sw/cms/shrc uaf'             >> $submit
+    echo 'scramv1 project CMSSW CMSSW_'$Release             >> $submit
+    echo 'cd CMSSW_'$Release'/src'                          >> $submit 
+    echo 'eval `scramv1 runtime -sh`'                       >> $submit
+    echo 'cd -'                                             >> $submit 
+  elif   [ "$Site" == "cern" ] ; then
+    echo 'source $HOME/EVAL_SH64 '$Release                  >> $submit
+  fi
   echo ' '                                                  >> $submit
-  echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'            >> $submit
+  if [ "$Site" == "fnal" ] ; then
+    echo "cp $pyCfg"' temp_${INPUT}.py'                     >> $submit
+  elif   [ "$Site" == "cern" ] ; then
+    echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'          >> $submit
+  fi
   echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
-  echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
+  if [ "$Site" == "fnal" ] ; then
+    echo 'cmsRun temp_${INPUT}.py &> '$LogDir$Dataset'_${INPUT}.log' >> $submit
+  elif   [ "$Site" == "cern" ] ; then 
+    echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
+  fi
   echo ' '                                                  >> $submit
   echo 'ls -l'                                              >> $submit 
   echo ' '                                                  >> $submit
-  echo 'tar czf logFile.tgz '$Dataset'_${INPUT}.log'        >> $submit       
-  echo 'scp -o StrictHostKeyChecking=no logFile.tgz '$subHOST':'$LogDir$Dataset'_${INPUT}.log.tgz'  >> $submit
+  if   [ "$Site" == "cern" ] ; then
+    echo 'tar czf logFile.tgz '$Dataset'_${INPUT}.log'        >> $submit       
+    echo 'scp -o StrictHostKeyChecking=no logFile.tgz '$subHOST':'$LogDir$Dataset'_${INPUT}.log.tgz'  >> $submit
+  fi
   echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   chmod +x $submit
 
-  taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
-  for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
-    echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-         bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-  done 
+  if [ "$Site" == "fnal" ] ; then
+    # FNAL: Need to create EosDir 
+    #ssh $fnaluser@cmslpc-sl5 whoami
+    #ssh $fnaluser@cmslpc-sl5 mkdir /eos/uscms/store/lhe/$eosnum
+
+    # FNAL: Need a jdl file
+
+    jdl=$WFWorkArea$requestID'.jdl'
+    cp /dev/null $jdl 
+    echo 'universe = vanilla'                               >> $jdl    
+    echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+    echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+    echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+    echo 'Executable = '$submit                             >> $jdl
+    echo 'should_transfer_files = YES'                      >> $jdl
+    echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
+    echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+    echo 'transfer_output_files = '                         >> $jdl
+    echo 'stream_error = false'                             >> $jdl
+    echo 'stream_output = false'                            >> $jdl
+    echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_$(process).out'  >> $jdl
+    echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_$(process).err'  >> $jdl
+    echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_$(process).log'  >> $jdl
+    echo 'notification = NEVER'                             >> $jdl
+    echo 'Arguments = $(process)'                           >> $jdl
+    echo 'priority = 10'                                    >> $jdl
+    echo 'Queue '$nJobs                                     >> $jdl
+
+    res=`(condor_submit $jdl)`
+    echo $res
+    taskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}')` 
+    echo "--> taskID: "$taskID
+
+  elif   [ "$Site" == "cern" ] ; then
+    taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
+    for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
+      echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+           bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+    done 
+  else
+    echo '[LHEProd::Submit] ERROR Unknown Site:' $Site
+    exit
+  fi
   cp /dev/null $lockFile
   cp /dev/null $actiFile
   echo $dir $lhein $taskID $nJobs >> $actiFile
@@ -220,10 +299,15 @@ sta_lhe()
   load=`(uptime | awk -F"load average:" '{print $2}' )`
   echo '   Load average   :'$load  
   echo "--------------------------------------------------------------------"
-  nRunTot=`(bjobs  | grep "RUN"  | wc | awk '{print $1}')`
-  nRunQDet=`(bjobs  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
-  nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
-  nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+  if [ "$Site" == "cern" ] ; then
+    nRunTot=`(bjobs  | grep "RUN"  | wc | awk '{print $1}')`
+    nRunQDet=`(bjobs  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
+    nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+  else
+    echo '[LHEProd.sh::Status] ERROR Unknown Site:' $Site
+    exit
+  fi
   echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
   echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
   echo "--------------------------------------------------------------------"
