@@ -376,7 +376,17 @@ sta_lhe()
 #       rm $expjoblist  
 #       rm $subjoblist
 
-       for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do 
+       if [ "$Site" == "cern" ] ; then
+         iStart=1
+         iStop=$nSubmit
+       elif [ "$Site" == "fnal" ] ; then
+         iStart=0
+         iStop=`(expr $nSubmit - 1)`
+       else
+         exit 
+       fi
+
+       for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do 
          bJobRP=0 
          for jRP in $lJobs ; do      
            if [ "$iJob" == "$jRP" ] ; then
@@ -493,10 +503,12 @@ resub_lhe()
     if [ "$a" == "y" ] ; then
       WFWorkArea=$WorkArea$requestID'/'
       submit=$WFWorkArea$requestID'.sub'
-      for iJob in $lFailed ; do
-        echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
-             bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
-      done
+      if [ "$Site" == "cern" ] ; then
+        for iJob in $lFailed ; do
+          echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+               bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+        done
+      fi 
     fi
   done
 }
@@ -526,14 +538,16 @@ add_lhejob()
     WFWorkArea=$WorkArea$requestID'/'
     submit=$WFWorkArea$requestID'.sub'
 
-    # New Start / Stop range
-    iJobStart=`(expr $nJobs + 1)`
-    nJobs=`(expr $nJobs + $addjob )`
-    for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
-      echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-           bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-    done 
-    echo $dir $lhe $taskID $nJobs > $iLHE
+    if [ "$Site" == "cern" ] ; then
+      # New Start / Stop range
+      iJobStart=`(expr $nJobs + 1)`
+      nJobs=`(expr $nJobs + $addjob )`
+      for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
+        echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+             bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+      done 
+      echo $dir $lhe $taskID $nJobs > $iLHE
+    fi
 
   done
 }
