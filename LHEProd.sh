@@ -30,7 +30,8 @@ if   [ "$Site" == "cern" ] ; then
 # Site Config: FNAL
 elif [ "$Site" == "fnal" ] ; then
 
-  fnaluser='xjanssen'
+  #fnaluser='xjanssen'
+  fnaluser=`(klist 2> /dev/null | grep "Default principal:" | awk -F': ' '{print $2}' | awk -F'@' '{print $1}')`
   eosBase="root://cmseos:1094//eos/uscms/store/lhe/"
   WorkArea="/storage/local/data1/cmsdataops/lhe/LHEProdWorkArea/"
   mkdir -p $WorkArea
@@ -199,7 +200,7 @@ sub_lhe()
   subHOST=`hostname`
  
   echo '#!/bin/sh'                                          >> $submit
-# echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
+  echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
   echo ' '                                                  >> $submit
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
@@ -221,19 +222,17 @@ sub_lhe()
     echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'          >> $submit
   fi
   echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
-  if [ "$Site" == "fnal" ] ; then
-    echo 'cmsRun temp_${INPUT}.py &> '$LogDir$Dataset'_${INPUT}.log' >> $submit
-  elif   [ "$Site" == "cern" ] ; then 
-    echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
-  fi
+  echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
   echo ' '                                                  >> $submit
   echo 'ls -l'                                              >> $submit 
   echo ' '                                                  >> $submit
-  if   [ "$Site" == "cern" ] ; then
-    echo 'tar czf logFile.tgz '$Dataset'_${INPUT}.log'        >> $submit       
-    echo 'scp -o StrictHostKeyChecking=no logFile.tgz '$subHOST':'$LogDir$Dataset'_${INPUT}.log.tgz'  >> $submit
+  echo 'tar czf '$Dataset'_${INPUT}.log.tgz '$Dataset'_${INPUT}.log' >> $submit       
+  if [ "$Site" == "fnal" ] ; then
+    echo 'xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
+  elif [ "$Site" == "cern" ] ; then
+    echo 'scp -o StrictHostKeyChecking=no '$Dataset'_${INPUT}.log.tgz '$subHOST':'$LogDir'/.'  >> $submit
+    echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   fi
-  echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   chmod +x $submit
 
   if [ "$Site" == "fnal" ] ; then
@@ -253,7 +252,8 @@ sub_lhe()
     echo 'should_transfer_files = YES'                      >> $jdl
     echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
     echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
-    echo 'transfer_output_files = '                         >> $jdl
+    echo 'transfer_output_files = '$Dataset'_$(process).log.tgz' >> $jdl
+    echo 'transfer_output_remaps = "'$Dataset'_$(process).log.tgz = '$LogDir'/'$Dataset'_$(process).log.tgz"' >> $jdl
     echo 'stream_error = false'                             >> $jdl
     echo 'stream_output = false'                            >> $jdl
     echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_$(process).out'  >> $jdl
@@ -304,14 +304,19 @@ sta_lhe()
     nRunQDet=`(bjobs  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
     nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
     nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
+    echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
+  elif [ "$Site" == "fnal" ] ; then
+    nRunTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+    nPendTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+    echo '   # Runing  Jobs : '$nRunTot 
+    echo '   # Pending Jobs : '$nPendTot 
   else
-    echo '[LHEProd.sh::Status] ERROR Unknown Site:' $Site
     exit
   fi
-  echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
-  echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
   echo "--------------------------------------------------------------------"
   echo
+
 
   lheact=$lhein 
   activeLHE=`(find . | grep ".active")`
@@ -326,13 +331,24 @@ sta_lhe()
     lhein=$lhe
     taskID=`(cat $iLHE | awk '{print $3}')`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
-    lJobs=`(bjobs | grep $taskID'_' | grep "RUN"  | awk '{print $7}' | awk -F "_" '{print $2}')`
-    lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND"  | awk '{print $6}' | awk -F "_" '{print $2}')`
-    nRun=`(bjobs | grep $taskID'_'  | grep "RUN"  | wc | awk '{print $1}')`
-    nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
+    if [ "$Site" == "cern" ] ; then
+      lJobs=`(bjobs | grep $taskID'_' | grep "RUN"  | awk '{print $7}' | awk -F "_" '{print $2}')`
+      lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND"  | awk '{print $6}' | awk -F "_" '{print $2}')`
+      nRun=`(bjobs | grep $taskID'_'  | grep "RUN"  | wc | awk '{print $1}')`
+      nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
+    elif [ "$Site" == "fnal" ] ; then
+      lJobs=""
+      nRun=`(condor_q | grep $taskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+      nPend=`(condor_q | grep $taskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+    fi
     parse_config 
-    lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
-    nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
+    if [ "$Site" == "cern" ] ; then
+      lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
+      nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
+    else
+      lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum)`
+      nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
+    fi 
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
     if [ $nFailed -lt 0 ] ; then
       nFailed=0
