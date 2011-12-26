@@ -229,6 +229,14 @@ sub_lhe()
   echo 'tar czf '$Dataset'_${INPUT}.log.tgz '$Dataset'_${INPUT}.log' >> $submit       
   if [ "$Site" == "fnal" ] ; then
     echo 'xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
+    echo 'if [ $? -ne 0 ] ; then'                           >> $submit
+    echo '  sleep 5m'                                       >> $submit
+    echo '  xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
+    echo '  if [ $? -ne 0 ] ; then'                         >> $submit
+    echo '    sleep 15m'                                    >> $submit
+    echo '    xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
+    echo '  fi'                                             >> $submit
+    echo 'fi'                                               >> $submit    
   elif [ "$Site" == "cern" ] ; then
     echo 'scp -o StrictHostKeyChecking=no '$Dataset'_${INPUT}.log.tgz '$subHOST':'$LogDir'/.'  >> $submit
     echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
@@ -332,13 +340,12 @@ sta_lhe()
     taskID=`(cat $iLHE | awk '{print $3}')`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
     if [ "$Site" == "cern" ] ; then
-      lJobs=`(bjobs | grep $taskID'_' | grep "RUN"  | awk '{print $7}' | awk -F "_" '{print $2}')`
-      lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND"  | awk '{print $6}' | awk -F "_" '{print $2}')`
-      nRun=`(bjobs | grep $taskID'_'  | grep "RUN"  | wc | awk '{print $1}')`
+      lJobs=`(bjobs | grep $taskID'_' | awk '{print $7}' | awk -F "_" '{print $2}')`
+      nRun=`(bjobs  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
       nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     elif [ "$Site" == "fnal" ] ; then
-      lJobs=""
-      nRun=`(condor_q | grep $taskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+      lJobs=`(condor_q | grep $taskID'.' | awk '{print $1}' | awk -F "." '{print $2}')`
+      nRun=`(condor_q  | grep $taskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
       nPend=`(condor_q | grep $taskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
     fi
     parse_config 
@@ -363,6 +370,7 @@ sta_lhe()
      echo '  --> Getting list of failed Jobs (be patient ....)' 
      if [ $nFailed -gt 0 ] ; then
        lFailed=""
+       lFailSeeds=""
 
 #       expjoblist=`(mktemp)`
 #       for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do
@@ -404,11 +412,13 @@ sta_lhe()
            done
            if [ $bJobF -eq 0 ] ; then
              lFailed=$lFailed' '$iJob
+             lFailSeeds=$lFailSeeds' '$SEED
            fi 
          fi
        done
 
        echo '  --> Failed Job(s) : ' $lFailed
+       echo '  --> Failed Seed(s): ' $lFailSeeds
        echo
      fi
     fi   
@@ -501,6 +511,8 @@ resub_lhe()
     echo -en "[LHEProd::Inject] INFO : Do you want to re-submit this WorkFlow ? [y/n] "
     read a
     if [ "$a" == "y" ] ; then
+      BaseDir=`pwd`'/'$dir
+      LogDir=$BaseDir'/LogFiles_'$requestID'/'
       WFWorkArea=$WorkArea$requestID'/'
       submit=$WFWorkArea$requestID'.sub'
       if [ "$Site" == "cern" ] ; then
@@ -508,6 +520,33 @@ resub_lhe()
           echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
                bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
         done
+      elif [ "$Site" == "fnal" ] ; then 
+        jdl=$WFWorkArea$requestID'.resub.jdl'
+        cp /dev/null $jdl
+        echo 'universe = vanilla'                               >> $jdl
+        echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+        echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+        echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+        echo 'Executable = '$submit                             >> $jdl
+        echo 'should_transfer_files = YES'                      >> $jdl
+        echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
+        echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+        echo 'stream_error = false'                             >> $jdl
+        echo 'stream_output = false'                            >> $jdl
+        echo 'notification = NEVER'                             >> $jdl
+        echo 'priority = 10'                                    >> $jdl
+        echo ' '                                                >> $jdl  
+        for iJob in $lFailed ; do
+          echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+          echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+          echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+          echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+          echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+          echo 'Arguments = '$iJob                                >> $jdl 
+          echo 'Queue '                                           >> $jdl
+          echo ' '                                                >> $jdl  
+        done
+        echo $jdl
       fi 
     fi
   done
