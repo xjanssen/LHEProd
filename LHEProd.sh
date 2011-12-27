@@ -275,7 +275,11 @@ sub_lhe()
     res=`(condor_submit $jdl)`
     echo $res
     taskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}')` 
-    echo "--> taskID: "$taskID
+    joblist=$dir'/'$lhe'.'$taskID'.joblist'
+    cp /dev/null $joblist
+    for ((i=0 ; i < $nJobs ; ++ i )) ; do
+      echo $taskID'.'$i' '$i >> $joblist 
+    done
 
   elif   [ "$Site" == "cern" ] ; then
     taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
@@ -337,16 +341,27 @@ sta_lhe()
       fi
     fi
     lhein=$lhe
-    taskID=`(cat $iLHE | awk '{print $3}')`
+    taskID=`(cat $iLHE | awk '{print $3}' | sed 's\:\ \g' )`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
     if [ "$Site" == "cern" ] ; then
       lJobs=`(bjobs | grep $taskID'_' | awk '{print $7}' | awk -F "_" '{print $2}')`
       nRun=`(bjobs  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
       nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     elif [ "$Site" == "fnal" ] ; then
-      lJobs=`(condor_q | grep $taskID'.' | awk '{print $1}' | awk -F "." '{print $2}')`
-      nRun=`(condor_q  | grep $taskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
-      nPend=`(condor_q | grep $taskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+      lJobs=""
+      nRun=0
+      nPend=0 
+      for itaskID in $taskID ; do
+        lJobsTmp=`(condor_q | grep $itaskID'.' | awk '{print $1}' )`
+        nRunTmp=`(condor_q  | grep $itaskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+        nPendTmp=`(condor_q | grep $itaskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+        joblist=$dir'/'$lhe'.'$itaskID'.joblist'
+        for ilJobsTmp in $lJobsTmp  ; do
+          lJobs=$lJobs' '`(grep $ilJobsTmp $joblist | awk '{print $2}')`    
+        done
+        nRun=`(expr $nRun + $nRunTmp)`
+        nPend=`(expr $nPend + $nPendTmp)`
+      done
     fi
     parse_config 
     if [ "$Site" == "cern" ] ; then
@@ -372,18 +387,6 @@ sta_lhe()
        lFailed=""
        lFailSeeds=""
 
-#       expjoblist=`(mktemp)`
-#       for (( iJob=1 ; iJob<=$nSubmit ; ++iJob )) ; do
-#         echo $iJob >> $epxjoblist
-#       done 
-#       subjoblist=`(mktemp)`
-#       for jRP in $lJobs ; do
-#         echo $jRP >> $subjoblist
-#       done    
-#
-#       rm $expjoblist  
-#       rm $subjoblist
-
        if [ "$Site" == "cern" ] ; then
          iStart=1
          iStop=$nSubmit
@@ -391,33 +394,61 @@ sta_lhe()
          iStart=0
          iStop=`(expr $nSubmit - 1)`
        else
-         exit 
+         exit
        fi
 
-       for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do 
-         bJobRP=0 
-         for jRP in $lJobs ; do      
-           if [ "$iJob" == "$jRP" ] ; then
-             bJobRP=1
-           fi
-         done
-         if [ $bJobRP -eq 0 ] ; then
-           SEED=`(expr $iJob + $SEEDOffset)`
-           expFile=$Dataset'_'$SEED'.lhe'
-           bJobF=0
-           for iFile in $lFiles ; do
-             if [ "$iFile" == "$expFile" ] ; then
-               bJobF=1
-             fi
-           done
-           if [ $bJobF -eq 0 ] ; then
-             lFailed=$lFailed' '$iJob
-             lFailSeeds=$lFailSeeds' '$SEED
-           fi 
-         fi
-       done
+       expjoblist=`(mktemp)`
+       for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do
+         echo $iJob >> $expjoblist
+       done 
+       subjoblist=`(mktemp)`
+       for jRP in $lJobs ; do
+         echo $jRP >> $subjoblist
+       done 
+       filjoblist=`(mktemp)`    
+       for iFile in $lFiles ; do  
+         SEED=`(echo $iFile | awk -F'_' '{print $NF}' | awk -F'.' '{print $1}')`
+         iJob=`(expr $SEED - $SEEDOffset)`
+         echo $iJob >> $filjoblist     
+       done 
+
+       difjoblist=`(mktemp)`
+       diff $expjoblist $subjoblist | grep "<" | awk '{print $2}' > $difjoblist
+       lFailed=`(diff $difjoblist $filjoblist | grep "<" | awk '{print $2}')`
+
+       rm $difjoblist
+       rm $expjoblist  
+       rm $subjoblist
+       rm $filjoblist
+
+#       for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do 
+#         bJobRP=0 
+#         for jRP in $lJobs ; do      
+#           if [ "$iJob" == "$jRP" ] ; then
+#             bJobRP=1
+#           fi
+#         done
+#         if [ $bJobRP -eq 0 ] ; then
+#           SEED=`(expr $iJob + $SEEDOffset)`
+#           expFile=$Dataset'_'$SEED'.lhe'
+#           bJobF=0
+#           for iFile in $lFiles ; do
+#             if [ "$iFile" == "$expFile" ] ; then
+#               bJobF=1
+#             fi
+#           done
+#           if [ $bJobF -eq 0 ] ; then
+#             lFailed=$lFailed' '$iJob
+#             lFailSeeds=$lFailSeeds' '$SEED
+#           fi 
+#         fi
+#       done
 
        echo '  --> Failed Job(s) : ' $lFailed
+       for iJob in $lFailed ; do
+         SEED=`(expr $iJob + $SEEDOffset)`
+         lFailSeeds=$lFailSeeds' '$SEED 
+       done
        echo '  --> Failed Seed(s): ' $lFailSeeds
        echo
      fi
@@ -495,11 +526,11 @@ check_nevt()
 resub_lhe()
 {
   lheact=$lhein
-  activeLHE=`(find . | grep ".active")`
-  for iLHE in $activeLHE ; do
-    dir=`(cat $iLHE | awk '{print $1}')`
-    lhe=`(cat $iLHE | awk '{print $2}')`
-    taskID=`(cat $iLHE | awk '{print $3}')`
+  activeLHErsb=`(find . | grep ".active")`
+  for iLHErsb in $activeLHErsb ; do
+    dir=`(cat $iLHErsb | awk '{print $1}')`
+    lhe=`(cat $iLHErsb | awk '{print $2}')`
+    OldtaskID=`(cat $iLHErsb | awk '{print $3}')`
     if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
         continue
@@ -508,6 +539,9 @@ resub_lhe()
     lhein=$lhe
     FindFailedJob=1
     sta_lhe 
+    dir=`(cat $iLHErsb | awk '{print $1}')`
+    nJobs=`(cat $iLHErsb | awk '{print $4}')`
+    echo $iLHErsb $lhein $dir $nJobs
     echo -en "[LHEProd::Inject] INFO : Do you want to re-submit this WorkFlow ? [y/n] "
     read a
     if [ "$a" == "y" ] ; then
@@ -546,7 +580,17 @@ resub_lhe()
           echo 'Queue '                                           >> $jdl
           echo ' '                                                >> $jdl  
         done
-        echo $jdl
+        res=`(condor_submit $jdl)`
+        echo $res
+        NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
+        echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs > $iLHErsb
+        joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
+        cp /dev/null $joblist
+        i=0   
+        for iJob in $lFailed ; do
+          echo $NewtaskID'.'$i' '$iJob >> $joblist 
+          i=`(expr $i + 1)`
+        done
       fi 
     fi
   done
