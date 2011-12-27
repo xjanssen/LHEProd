@@ -129,7 +129,7 @@ parse_config()
   echo 'Events/Job : '$EvtJob
   echo '#Jobs      : '$nJobs
   echo 'Dataset    : '$Dataset
-  echo 'pyCfg      : '$dir$pyCfg
+  echo 'pyCfg      : '$dir'/'$pyCfg
   echo 'EOS Dir    : '$eosDir
   echo '---------------------------------------'
   echo
@@ -274,8 +274,9 @@ sub_lhe()
 
     res=`(condor_submit $jdl)`
     echo $res
-    taskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}')` 
-    joblist=$dir'/'$lhe'.'$taskID'.joblist'
+    taskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's/ //g' )` 
+    joblist=$BaseDir'/'$requestID'.'$taskID'.joblist'
+    echo $joblist
     cp /dev/null $joblist
     for ((i=0 ; i < $nJobs ; ++ i )) ; do
       echo $taskID'.'$i' '$i >> $joblist 
@@ -355,7 +356,7 @@ sta_lhe()
         lJobsTmp=`(condor_q | grep $itaskID'.' | awk '{print $1}' )`
         nRunTmp=`(condor_q  | grep $itaskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
         nPendTmp=`(condor_q | grep $itaskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
-        joblist=$dir'/'$lhe'.'$itaskID'.joblist'
+        joblist=$dir'/'$lhein'.'$itaskID'.joblist'
         for ilJobsTmp in $lJobsTmp  ; do
           lJobs=$lJobs' '`(grep $ilJobsTmp $joblist | awk '{print $2}')`    
         done
