@@ -369,7 +369,7 @@ sta_lhe()
       lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
       nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
     else
-      lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum)`
+      lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum 2> /dev/null)`
       nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
     fi 
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
@@ -569,7 +569,7 @@ resub_lhe()
         echo 'stream_error = false'                             >> $jdl
         echo 'stream_output = false'                            >> $jdl
         echo 'notification = NEVER'                             >> $jdl
-        echo 'priority = 10'                                    >> $jdl
+        echo 'priority = 15'                                    >> $jdl
         echo ' '                                                >> $jdl  
         for iJob in $lFailed ; do
           echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
@@ -609,16 +609,18 @@ add_lhejob()
 
   lheact=$lhein 
   activeLHE=`(find . | grep ".active")`
-  for iLHE in $activeLHE ; do
-    lhe=`(cat $iLHE | awk '{print $2}')`
+  for iLHEadd in $activeLHE ; do
+    lhe=`(cat $iLHEadd | awk '{print $2}')`
     if [ "$lhe" != "$lheact" ] ; then
       continue
     fi
     lhein=$lhe
-    dir=`(cat $iLHE | awk '{print $1}')`
-    taskID=`(cat $iLHE | awk '{print $3}')`
+    dir=`(cat $iLHEadd | awk '{print $1}')`
+    taskID=`(cat $iLHEadd | awk '{print $3}')`
+    OldtaskID=`(cat $iLHEadd | awk '{print $3}')`
     parse_config
-    nJobs=`(cat $iLHE | awk '{print $4}')`
+    dir=`(cat $iLHEadd | awk '{print $1}')`
+    nJobs=`(cat $iLHEadd | awk '{print $4}')`
     WFWorkArea=$WorkArea$requestID'/'
     submit=$WFWorkArea$requestID'.sub'
 
@@ -630,7 +632,48 @@ add_lhejob()
         echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
              bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
       done 
-      echo $dir $lhe $taskID $nJobs > $iLHE
+      echo $dir $lhe $taskID $nJobs > $iLHEadd
+    elif [ "$Site" == "fnal" ] ; then
+      # New Start / Stop range
+      iJobStart=$nJobs
+      nJobs=`(expr $nJobs + $addjob )`
+      # FNAL jdl
+      jdl=$WFWorkArea$requestID'.resub.jdl'
+      cp /dev/null $jdl
+      echo 'universe = vanilla'                               >> $jdl
+      echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+      echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+      echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+      echo 'Executable = '$submit                             >> $jdl
+      echo 'should_transfer_files = YES'                      >> $jdl
+      echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
+      echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+      echo 'stream_error = false'                             >> $jdl
+      echo 'stream_output = false'                            >> $jdl
+      echo 'notification = NEVER'                             >> $jdl
+      echo 'priority = 10'                                    >> $jdl
+      echo ' '                                                >> $jdl
+      for (( iJob=$iJobStart ; iJob<$nJobs ; ++iJob )) ; do 
+        echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+        echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+        echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+        echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+        echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+        echo 'Arguments = '$iJob                                >> $jdl
+        echo 'Queue '                                           >> $jdl
+        echo ' '                                                >> $jdl
+      done 
+      res=`(condor_submit $jdl)`
+      echo $res
+      NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
+      echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs > $iLHEadd
+      joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
+      cp /dev/null $joblist
+      i=0
+      for (( iJob=$iJobStart ; iJob<$nJobs ; ++iJob )) ; do
+        echo $NewtaskID'.'$i' '$iJob >> $joblist
+        i=`(expr $i + 1)`
+      done  
     fi
 
   done
