@@ -410,7 +410,8 @@ sta_lhe()
     nRun=0
     nPend=0 
     if [ "$Site" == "cern" ] && [ "$runSite" == "cern" ] ; then
-      lJobs=`(bjobs | grep $taskID'_' | awk '{print $7}' | awk -F "_" '{print $2}')`
+      lJobs=`(bjobs | grep $taskID'_' | grep "RUN" | awk '{print $7}' | awk -F "_" '{print $2}')`
+      lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND" | awk '{print $6}' | awk -F "_" '{print $2}')`
       nRun=`(bjobs  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
       nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     elif [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ; then
@@ -470,25 +471,37 @@ sta_lhe()
        for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do
          echo $iJob >> $expjoblist
        done 
+       expjoblists=`(mktemp)`
+       sort -n $expjoblist >> $expjoblists       
+
        subjoblist=`(mktemp)`
        for jRP in $lJobs ; do
          echo $jRP >> $subjoblist
        done 
+       subjoblists=`(mktemp)`
+       sort -n $subjoblist >> $subjoblists
+
        filjoblist=`(mktemp)`    
        for iFile in $lFiles ; do  
          SEED=`(echo $iFile | awk -F'_' '{print $NF}' | awk -F'.' '{print $1}')`
          iJob=`(expr $SEED - $SEEDOffset)`
          echo $iJob >> $filjoblist     
        done 
+       filjoblists=`(mktemp)`
+       sort -n $filjoblist >> $filjoblists
 
        difjoblist=`(mktemp)`
-       diff $expjoblist $subjoblist | grep "<" | awk '{print $2}' > $difjoblist
-       lFailed=`(diff $difjoblist $filjoblist | grep "<" | awk '{print $2}')`
+       diff $expjoblists $subjoblists | grep "<" | awk '{print $2}' > $difjoblist
+       lFailed=`(diff $difjoblist $filjoblists | grep "<" | awk '{print $2}')`
 
        rm $difjoblist
        rm $expjoblist  
        rm $subjoblist
        rm $filjoblist
+       rm $expjoblists 
+       rm $subjoblists
+       rm $filjoblists
+
 
 #       for (( iJob=$iStart ; iJob<=$iStop ; ++iJob )) ; do 
 #         bJobRP=0 
@@ -513,12 +526,12 @@ sta_lhe()
 #         fi
 #       done
 
-       echo '  --> Failed Job(s) : ' $lFailed
-       for iJob in $lFailed ; do
-         SEED=`(expr $iJob + $SEEDOffset)`
-         lFailSeeds=$lFailSeeds' '$SEED 
-       done
-       echo '  --> Failed Seed(s): ' $lFailSeeds
+       echo '  --> Failed Job(s) : '  $lFailed 
+#      for iJob in $lFailed ; do
+#        SEED=`(expr $iJob + $SEEDOffset)`
+#        lFailSeeds=$lFailSeeds' '$SEED 
+#      done
+#      echo '  --> Failed Seed(s): ' $lFailSeeds
        echo
      fi
     fi   
