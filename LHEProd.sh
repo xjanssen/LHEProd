@@ -584,8 +584,8 @@ check_nevt()
     echo '... Running file check in bkgd ... you will receive an email ...' 
  
     #echo $submit
-    #bsub -u $email -q $chkqueue -o $WFWorkArea$Dataset'_'$taskID'_'chkevt.out -J ChkEv$taskID $submit 
-    nohup $submit &> /dev/null &
+    bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'chkevt.out -J ChkEv$taskID $submit 
+    #nohup $submit &> /dev/null &
 
   done
 }
