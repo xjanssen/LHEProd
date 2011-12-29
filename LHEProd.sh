@@ -80,6 +80,9 @@ Possibilities:
        Get Status of all LHE ongoing WF or of lheID WF
        -fjlist : Get List of failed jobs (be patient)
 
+  LHEProd.sh -sync -lhe <lheID>
+       Copy remote WF output files back to CERN EOS
+
   LHEProd.sh -chknevt [-lhe <lheID>]
        Check # produced events for all LHE ongoing WF or lheID WF
        (This is taking quite long time .... )
