@@ -27,6 +27,12 @@ if   [ "$Site" == "cern" ] ; then
   WorkArea=$HOME"/scratch0/LHEProdWorkArea/"
   mkdir -p $WorkArea
 
+  #... sync
+  source /afs/cern.ch/cms/LCG/LCG-2/UI/cms_ui_env.sh
+  globusDir=`pwd`'/.globus'
+  fnalsrm='srm://cmseos.fnal.gov:8443/srm/v2/server?SFN='
+  fnaleos='/eos/uscms/store/lhe'
+
 # Site Config: FNAL
 elif [ "$Site" == "fnal" ] ; then
 
@@ -57,8 +63,12 @@ Possibilities:
   LHEProd.sh -inject -tgz <WebWFFile> : 
        Dowload WorkFlow tarball and submit jobs
 
-  LHEProd.sh -submit -dir <WFDir> -lhe <lheID> : 
+  LHEProd.sh -submit -dir <WFDir> -lhe <lheID> [-njmax <nJobs>]: 
        Submit lheID WF already dowloaded to WFDir
+       -njmax <nJobs>: start nJobs
+
+  LHEProd.sh -extsub <Site> -dir <WFDir> -lhe <lheID> :
+       Register lheID WF as being submitted at another site <Site>
 
   LHEProd.sh -resub  [-lhe <lheID>] 
        Resubmit Failed jobs for all LHE ongoing WF or lheID WF   
@@ -165,6 +175,14 @@ inj_lhe()
       y) echo "... Submitting ..." ; sub_lhe ;;
       *) echo "... NOT Submitting ..." ;;
     esac  
+    echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
+    read a
+    case $a in
+      y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
+      *) echo "... NOT Registering ..." ;;
+    esac  
+
+
   done
 }
 
@@ -294,8 +312,44 @@ sub_lhe()
   fi
   cp /dev/null $lockFile
   cp /dev/null $actiFile
-  echo $dir $lhein $taskID $nJobs >> $actiFile
+  echo $dir $lhein $taskID $nJobs $Site >> $actiFile
 } 
+
+# ------------------------ EXTERNAL WF REGISTRATION -----------------------------
+extsub_lhe()
+{
+
+  lhe=$lhein
+  parse_config
+
+  if [ "$Site" != "cern" ] ; then
+    echo '[LHEProd::Extsub] ERROR: External WF only possible at CERN master node'
+    exit
+  fi
+
+  if [ "$extsub" == "fnal" ] ; then
+    PWD=`pwd`
+    BaseDir=`pwd`'/'$dir
+    lockFile=$BaseDir'/'$requestID'.lock'
+    actiFile=$BaseDir'/'$requestID'.active'
+    echo -en "[LHEProd::Extsub] INFO : Do you want to register this WorkFlow at $extsub ? [y/n] "
+    read a
+    case $a in
+      y) echo "... Registering External WF ..." ;;
+      *) exit ;;
+    esac
+    LogDir=$BaseDir'/LogFiles_'$requestID'/'
+    mkdir -p $LogDir
+    WFWorkArea=$WorkArea$requestID'/'
+    mkdir -p $WFWorkArea
+    cp /dev/null $lockFile
+    cp /dev/null $actiFile
+    echo $dir $lhein NULL $nJobs $extsub >> $actiFile
+
+  else
+    echo '[LHEProd::Extsub] ERROR: Unknown External Site : '$extsub
+  fi
+}
 
 # ------------------------  WORFLOW(S) STATUS ------------------------------------
 sta_lhe() 
@@ -319,6 +373,10 @@ sta_lhe()
     nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
     echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
     echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
+    nSync=`(bjobs  | grep "Sync" | wc | awk '{print $1}')`
+    nSyncR=`(bjobs  | grep "Sync" | grep "RUN" | wc | awk '{print $1}')`
+    nSyncP=`(bjobs  | grep "Sync" | grep "PEND" | wc | awk '{print $1}')`
+    echo '   # Sync    Jobs : '$nSync ' [ Running : '$nSyncR' / Pending : '$nSyncP' ]'
   elif [ "$Site" == "fnal" ] ; then
     nRunTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
     nPendTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
@@ -344,14 +402,15 @@ sta_lhe()
     lhein=$lhe
     taskID=`(cat $iLHE | awk '{print $3}' | sed 's\:\ \g' )`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
-    if [ "$Site" == "cern" ] ; then
+    runSite=`(cat $iLHE | awk '{print $5}')`
+    lJobs=""
+    nRun=0
+    nPend=0 
+    if [ "$Site" == "cern" ] && [ "$runSite" == "cern" ] ; then
       lJobs=`(bjobs | grep $taskID'_' | awk '{print $7}' | awk -F "_" '{print $2}')`
       nRun=`(bjobs  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
       nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
-    elif [ "$Site" == "fnal" ] ; then
-      lJobs=""
-      nRun=0
-      nPend=0 
+    elif [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ; then
       for itaskID in $taskID ; do
         lJobsTmp=`(condor_q | grep $itaskID'.' | awk '{print $1}' )`
         nRunTmp=`(condor_q  | grep $itaskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
@@ -368,7 +427,7 @@ sta_lhe()
     if [ "$Site" == "cern" ] ; then
       lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
       nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
-    else
+    elif [ "$Site" == "fnal" ] ; then
       lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum 2> /dev/null)`
       nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
     fi 
@@ -377,9 +436,15 @@ sta_lhe()
       nFailed=0
     fi
 
-    echo '  --> Submitted : '$nSubmit' [ Running : '$nRun' / Pending : '$nPend' ]' 
-    echo '  --> Finished  : '$nFiles   
-    echo '  --> Failed    : '$nFailed 
+    if [ "$Site" == "$runSite" ] ; then
+      echo '  --> Submitted : '$nSubmit' [ Running : '$nRun' / Pending : '$nPend' ]' 
+      echo '  --> Finished  : '$nFiles   
+      echo '  --> Failed    : '$nFailed
+    else
+      echo '  --> WF running at : '$runSite
+      echo '  --> Expected Files: '$nJobs
+      echo '  --> Synced   Files: '$nFiles 
+    fi
     echo
 
     if [ $FindFailedJob -eq 1 ] ; then
@@ -531,6 +596,10 @@ resub_lhe()
   for iLHErsb in $activeLHErsb ; do
     dir=`(cat $iLHErsb | awk '{print $1}')`
     lhe=`(cat $iLHErsb | awk '{print $2}')`
+    runSite=`(cat $iLHErsb | awk '{print $5}')`
+    if [ "$Site" != "$runSite" ] ; then
+      continue
+    fi
     OldtaskID=`(cat $iLHErsb | awk '{print $3}')`
     if [ "$lheact" != "NULL" ] ; then
       if [ "$lhe" != "$lheact" ] ; then
@@ -552,8 +621,8 @@ resub_lhe()
       submit=$WFWorkArea$requestID'.sub'
       if [ "$Site" == "cern" ] ; then
         for iJob in $lFailed ; do
-          echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
-               bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+          echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+               bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
         done
       elif [ "$Site" == "fnal" ] ; then 
         jdl=$WFWorkArea$requestID'.resub.jdl'
@@ -584,7 +653,7 @@ resub_lhe()
         res=`(condor_submit $jdl)`
         echo $res
         NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
-        echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs > $iLHErsb
+        echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site > $iLHErsb
         joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
         cp /dev/null $joblist
         i=0   
@@ -611,9 +680,14 @@ add_lhejob()
   activeLHE=`(find . | grep ".active")`
   for iLHEadd in $activeLHE ; do
     lhe=`(cat $iLHEadd | awk '{print $2}')`
+    runSite=`(cat $iLHEadd | awk '{print $5}')`
+    if [ "$Site" != "$runSite" ] ; then
+      continue
+    fi
     if [ "$lhe" != "$lheact" ] ; then
       continue
     fi
+    echo $lhe
     lhein=$lhe
     dir=`(cat $iLHEadd | awk '{print $1}')`
     taskID=`(cat $iLHEadd | awk '{print $3}')`
@@ -632,7 +706,7 @@ add_lhejob()
         echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
              bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
       done 
-      echo $dir $lhe $taskID $nJobs > $iLHEadd
+      echo $dir $lhe $taskID $nJobs $Site > $iLHEadd
     elif [ "$Site" == "fnal" ] ; then
       # New Start / Stop range
       iJobStart=$nJobs
@@ -666,7 +740,7 @@ add_lhejob()
       res=`(condor_submit $jdl)`
       echo $res
       NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
-      echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs > $iLHEadd
+      echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site > $iLHEadd
       joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
       cp /dev/null $joblist
       i=0
@@ -700,7 +774,92 @@ clean_afs_log()
     mkdir -p $LogDir
     mv $WFWorkArea/*.out $LogDir
   done
-  mv $HOME/LSFJOB_* $LsfOutDir
+  if [ "$Site" == "cern" ] ; then
+    mv $HOME/LSFJOB_* $LsfOutDir
+  fi
+}
+
+
+# ------------------------ SYNC EXTERNAL WF ---------------------------------------
+sync_lhe()
+{
+
+  if [ "$Site" != "cern" ] ; then
+    echo '[LHEProd::Sync] ERROR: External WF only possible at CERN master node'
+    exit
+  fi
+
+  lheact=$lhein
+  activeLHE=`(find . | grep ".active")`
+  for iLHEsnc in $activeLHE ; do 
+    dir=`(cat $iLHEsnc | awk '{print $1}')`
+    lhe=`(cat $iLHEsnc | awk '{print $2}')`
+    runSite=`(cat $iLHEsnc | awk '{print $5}')`
+    if [ "$Site" == "$runSite" ] ; then
+      continue
+    fi
+    if [ "$lheact" != "NULL" ] ; then
+      if [ "$lhe" != "$lheact" ] ; then
+        continue
+      fi
+    fi
+    lhein=$lhe
+    sta_lhe
+    echo -en "[LHEProd::Sync] INFO : Do you want to Sync this WorkFlow ? [y/n] "
+    read a
+    if [ "$a" == "y" ] ; then
+      dir=`(cat $iLHEsnc | awk '{print $1}')`
+      BaseDir=`pwd`'/'$dir
+      LogDir=$BaseDir'/LogFiles_'$requestID'/'
+      WFWorkArea=$WorkArea$requestID'/'
+      if [ "$runSite" == "fnal" ] ; then
+        lockFile=$WFWorkArea$requestID'.synclock'
+        if [ -f $lockFile ] ; then
+          echo '[LHEProd.sh::Submit] ERROR lockFile exist:' $lockFile
+          exit
+        fi
+
+        voms-proxy-init -cert $globusDir/usercert.pem -key $globusDir/userkey.pem -valid 168:00 
+        certfull=`(voms-proxy-info | grep path | awk -F":" '{print $2}' | sed 's: ::g')`
+        certshort=`(echo $certfull | awk -F"/" '{print $NF}')`
+        cp $certfull $WFWorkArea
+ 
+        syncJob=$WFWorkArea$requestID'.sync'
+        cp /dev/null $syncJob
+        echo '#!/bin/sh'                                          >> $syncJob
+        echo ' '                                                  >> $syncJob 
+        echo 'PWD=`pwd`'                                          >> $syncJob  
+        echo 'mv '$WFWorkArea$certshort' /tmp/'$certshort         >> $syncJob
+        echo 'srmls '$fnalsrm$fnaleos'/'$eosnum' | grep '$Dataset '| awk '\''{print $2":"$1}'\' ' > rFiles '  >> $syncJob
+        echo 'echo "Remote Files : " `(wc rFiles)` '              >> $syncJob
+#       echo 'xrd eoscms dirlist /eos/cms/store/lhe/'$eosnum' | grep '$Dataset' | grep eos | awk '\''{print $5":"$2}'\'' > lFiles'  >> $syncJob
+        echo 'for irFile in `(cat rFiles)` ; do'                  >> $syncJob
+        echo '  rFile=`(echo $irFile | awk -F'\'':'\'' '\''{print $1}'\'' | awk -F'\''/'\'' '\''{print $NF}'\'')`'  >> $syncJob
+        echo '  rSize=`(echo $irFile | awk -F'\'':'\'' '\''{print $2}'\'')`'  >> $syncJob 
+        echo '  if [ $rSize -gt 0 ] ; then '                      >> $syncJob
+        echo '    echo "Copying: "$rFile'                         >> $syncJob
+        echo '    lcg-cp --nobdii -D srmv2 '$fnalsrm$fnaleos'/'$eosnum'/$rFile file:///$PWD/$rFile'      >> $syncJob 
+        echo '    ls -l '                                         >> $syncJob
+        echo '    xrdcp -np $rFile '$eosDir'/$rFile'              >> $syncJob 
+        echo '    rm $rFile'                                      >> $syncJob 
+        echo '  else'                                             >> $syncJob 
+        echo '    echo $rFile "has zero size !" '                 >> $syncJob 
+        echo '  fi'                                               >> $syncJob 
+        echo 'done'                                               >> $syncJob
+        echo 'rm /tmp/'$certshort                                 >> $syncJob
+        echo 'rm '$lockFile                                       >> $syncJob
+        
+        chmod +x $syncJob
+        echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out -J Sync $syncJob
+        bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'sync.out -J Sync $syncJob
+        touch $lockFile
+      else
+        echo '[LHEProd::Sync] ERROR: Unknown External Site : '$extsub
+      fi 
+    fi
+  done
+
+
 }
 
 # ------------------------ CLOSE WORFLOW ------------------------------------------
@@ -764,6 +923,7 @@ tgz="NULL"
 dir="NULL"
 lhein="NULL"
 sub=0
+extsub="NULL"
 resub=0
 addjob=0
 sta=0
@@ -771,6 +931,7 @@ inj=0
 clo=0
 cleanlog=0
 chknevt=0
+sync=0
 
 nJobMax=0
 iJobStart=1
@@ -784,12 +945,14 @@ for arg in $* ; do
     -lhe)    lhein=$2      ; shift ; shift ;;
     -inject) inj=1                 ; shift ;;
     -submit) sub=1                 ; shift ;;
+    -extsub) extsub=$2     ; shift ; shift ;;
     -njmax)  nJobMax=$2    ; shift ; shift ;;
     -jstart) iJobStart=$2  ; shift ; shift ;;
     -resub)  resub=1               ; shift ;;
     -addjob) addjob=$2     ; shift ; shift ;;
     -status) sta=1                 ; shift ;;
     -fjlist) FindFailedJob=1       ; shift ;;
+    -sync)   sync=1                ; shift ;;
     -chknevt) chknevt=1            ; shift ;;
     -cleanlog) cleanlog=1          ; shift ;;
     -close)  clo=1                 ; shift ;;
@@ -811,6 +974,11 @@ if [ $sub -eq 1 ] ; then
   exit
 fi
 
+if [ "$extsub" != "NULL" ] ; then
+  extsub_lhe 
+  exit
+fi
+
 if [ $resub -eq 1 ] ; then
   resub_lhe
   exit
@@ -823,6 +991,11 @@ fi
 
 if [ $sta -eq 1 ] ; then
   sta_lhe
+  exit
+fi
+
+if [ $sync -eq 1 ] ; then
+  sync_lhe
   exit
 fi
 
