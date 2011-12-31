@@ -175,16 +175,17 @@ inj_lhe()
     echo -en "[LHEProd::Inject] INFO : Do you want to submit this WorkFlow ? [y/n] "
     read a
     case $a in
-      y) echo "... Submitting ..." ; sub_lhe ;;
+      y) echo "... Submitting ..." ; sub_lhe ; continue ;;
       *) echo "... NOT Submitting ..." ;;
     esac  
-    echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
-    read a
-    case $a in
-      y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
-      *) echo "... NOT Registering ..." ;;
-    esac  
-
+    if [ "$Site" == "cern" ] ; then
+      echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
+      read a
+      case $a in
+        y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
+        *) echo "... NOT Registering ..." ;;
+      esac  
+    fi
 
   done
 }
