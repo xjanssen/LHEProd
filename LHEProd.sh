@@ -76,6 +76,8 @@ Possibilities:
   LHEProd.sh -addjob <#job> -lhe <lheID>
        Submit <#job> extra jobs for <lheID> WF
 
+  LHEProd.sh -kill -lhe <lheID>
+
   LHEProd.sh -status [-lhe <lheID>] [-fjlist]:
        Get Status of all LHE ongoing WF or of lheID WF
        -fjlist : Get List of failed jobs (be patient)
