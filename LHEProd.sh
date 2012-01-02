@@ -685,6 +685,50 @@ resub_lhe()
   done
 }
 
+# ------------------------ Kill LHE WF -------------------------------------
+kill_lhe()
+{
+
+  if [ "$lhein" == "NULL" ] ; then
+    echo "[LHEProd::Kill] ERROR: <lheID> not specified "
+    exit
+  fi
+
+  lheact=$lhein
+  activeLHE=`(find . | grep ".active")`
+  for iLHEkil in $activeLHE ; do
+    lhe=`(cat $iLHEkil | awk '{print $2}')`
+    runSite=`(cat $iLHEkil | awk '{print $5}')`
+    if [ "$Site" != "$runSite" ] ; then
+      continue
+    fi
+    if [ "$lhe" != "$lheact" ] ; then
+      continue
+    fi
+    lhein=$lhe 
+    dir=`(cat $iLHEkil | awk '{print $1}')`
+    parse_config
+    sta_lhe
+    taskID=`(cat $iLHEkil | awk '{print $3}' | sed 's\:\ \g')`
+
+    echo -en "[LHEProd::Extsub] INFO : Do you want to KILL JOBS for this WorkFlow ? [y/n] "
+    read a
+    case $a in
+      y) echo "... Killing all Jobs for $lhein ..." ;;
+      *) exit ;;
+    esac
+    if [ "$Site" == "cern" ] ; then
+      bjobs | grep $taskID'_' | awk '{print $1}' | xargs -n 1 bkill 
+    elif [ "$Site" == "fnal" ] ; then
+      for itaskID in $taskID ; do
+        condor_rm $itaskID
+      done       
+    fi
+  done
+
+
+}
+
 # ------------------------ Add jobs to LHE WF -------------------------------------
 
 add_lhejob()
@@ -858,8 +902,10 @@ sync_lhe()
         echo '  if [ $rSize -gt 0 ] ; then '                      >> $syncJob
         echo '    echo "Copying: "$rFile'                         >> $syncJob
         echo '    lcg-cp --nobdii -D srmv2 '$fnalsrm$fnaleos'/'$eosnum'/$rFile file:///$PWD/$rFile'      >> $syncJob 
+        echo '    if [ $? -eq 0 ] ; then '                        >> $syncJob
+        echo '      xrdcp -np $rFile '$eosDir'/$rFile'            >> $syncJob
+        echo '    fi'                                             >> $syncJob 
         echo '    ls -l '                                         >> $syncJob
-        echo '    xrdcp -np $rFile '$eosDir'/$rFile'              >> $syncJob 
         echo '    rm $rFile'                                      >> $syncJob 
         echo '  else'                                             >> $syncJob 
         echo '    echo $rFile "has zero size !" '                 >> $syncJob 
@@ -944,6 +990,7 @@ lhein="NULL"
 sub=0
 extsub="NULL"
 resub=0
+kil=0
 addjob=0
 sta=0
 inj=0
@@ -969,6 +1016,7 @@ for arg in $* ; do
     -jstart) iJobStart=$2  ; shift ; shift ;;
     -resub)  resub=1               ; shift ;;
     -addjob) addjob=$2     ; shift ; shift ;;
+    -kill)   kil=1                 ; shift ;;
     -status) sta=1                 ; shift ;;
     -fjlist) FindFailedJob=1       ; shift ;;
     -sync)   sync=1                ; shift ;;
@@ -1005,6 +1053,11 @@ fi
 
 if [ $addjob -gt 0 ] ; then
   add_lhejob
+  exit
+fi
+
+if [ $kil -eq 1 ] ; then
+  kill_lhe
   exit
 fi
 
