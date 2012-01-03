@@ -431,6 +431,13 @@ sta_lhe()
       done
     fi
     parse_config 
+    BaseDir=`pwd`'/'$dir
+    BadSeeds=$BaseDir'/'$requestID'.badseeds'
+    if [ -f $BadSeeds ] ; then
+      nBadSeeds=`(cat $BadSeeds | wc | awk '{print $1}')`
+    else
+      nBadSeeds=0
+    fi
     if [ "$Site" == "cern" ] ; then
       lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
       nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
@@ -438,7 +445,7 @@ sta_lhe()
       lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum 2> /dev/null)`
       nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
     fi 
-    nFailed=$(($nSubmit - $nRun - $nPend - $nFiles)) 
+    nFailed=$(($nSubmit - $nRun - $nPend - $nFiles -$nBadSeeds )) 
     if [ $nFailed -lt 0 ] ; then
       nFailed=0
     fi
@@ -446,6 +453,7 @@ sta_lhe()
     if [ "$Site" == "$runSite" ] ; then
       echo '  --> Submitted : '$nSubmit' [ Running : '$nRun' / Pending : '$nPend' ]' 
       echo '  --> Finished  : '$nFiles   
+      echo '  --> Bad Seeds : '$nBadSeeds
       echo '  --> Failed    : '$nFailed
     else
       echo '  --> WF running at : '$runSite
@@ -458,6 +466,7 @@ sta_lhe()
      echo '  --> Getting list of failed Jobs (be patient ....)' 
      if [ $nFailed -gt 0 ] ; then
        lFailed=""
+       lFailedJobs=""
        lFailSeeds=""
 
        if [ "$Site" == "cern" ] ; then
@@ -495,8 +504,23 @@ sta_lhe()
 
        difjoblist=`(mktemp)`
        diff $expjoblists $subjoblists | grep "<" | awk '{print $2}' > $difjoblist
-       lFailed=`(diff $difjoblist $filjoblists | grep "<" | awk '{print $2}')`
+       badjoblist=`(mktemp)`
+       diff $difjoblist $filjoblists | grep "<" | awk '{print $2}' > $badjoblist  
 
+       if [ -f $BadSeeds ] ; then
+         BadSeedJobs=`(mktemp)`
+         for iSeed in `(cat $BadSeeds)` ; do
+           iJob=`(expr $iSeed - $SEEDOffset)`
+           echo $iJob >> $BadSeedJobs 
+         done
+         lFailed=`(diff $badjoblist $BadSeedJobs | grep "<" | awk '{print $2}')`
+         diff $badjoblist $BadSeedJobs
+         rm $BadSeedJobs
+       else
+         lFailed=`(diff $difjoblist $filjoblists | grep "<" | awk '{print $2}')`
+       fi
+
+       rm $badjoblist
        rm $difjoblist
        rm $expjoblist  
        rm $subjoblist
@@ -529,12 +553,23 @@ sta_lhe()
 #         fi
 #       done
 
-       echo '  --> Failed Job(s) : '  $lFailed 
-#      for iJob in $lFailed ; do
-#        SEED=`(expr $iJob + $SEEDOffset)`
-#        lFailSeeds=$lFailSeeds' '$SEED 
-#      done
-#      echo '  --> Failed Seed(s): ' $lFailSeeds
+
+       BaseDir=`pwd`'/'$dir
+       LogDir=$BaseDir'/LogFiles_'$requestID'/'
+
+       for iJob in $lFailed ; do
+         logFile=$LogDir'/'$Dataset'_'$iJob'.log.tgz'
+         tar xzfO $logFile 2> /dev/null | grep  "%MSG-MG5 Error: The are less events" &> /dev/null
+         if [ $? -eq 0 ] ; then
+           SEED=`(expr $iJob + $SEEDOffset)`
+           lFailSeeds=$lFailSeeds' '$SEED
+         else   
+           lFailedJobs=$lFailedJobs' '$iJob
+         fi
+       done 
+
+       echo '  --> Failed Job(s) : ' $lFailedJobs 
+       echo '  --> Failed Seed(s): ' $lFailSeeds
        echo
      fi
     fi   
@@ -639,10 +674,24 @@ resub_lhe()
       WFWorkArea=$WorkArea$requestID'/'
       submit=$WFWorkArea$requestID'.sub'
       if [ "$Site" == "cern" ] ; then
-        for iJob in $lFailed ; do
+        for iJob in $lFailedJobs ; do
           echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
                bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
         done
+
+        
+        if [ `(echo $lFailSeeds | wc | awk '{print $1}')` -gt 0 ] ; then
+          BadSeeds=$BaseDir'/'$requestID'.badseeds'
+          touch $BadSeeds 
+          for iSeed in $lFailSeeds ; do
+            echo $iSeed >> $BadSeeds
+            nJobs=`(expr $nJobs + 1)`
+            iJob=$nJobs
+            echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+                 bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+          done
+          echo $dir $lhein $OldtaskID $nJobs $Site > $iLHErsb
+        fi 
       elif [ "$Site" == "fnal" ] ; then 
         jdl=$WFWorkArea$requestID'.resub.jdl'
         cp /dev/null $jdl
@@ -659,7 +708,7 @@ resub_lhe()
         echo 'notification = NEVER'                             >> $jdl
         echo 'priority = 15'                                    >> $jdl
         echo ' '                                                >> $jdl  
-        for iJob in $lFailed ; do
+        for iJob in $lFailedJobs ; do
           echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
           echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
           echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
@@ -669,6 +718,24 @@ resub_lhe()
           echo 'Queue '                                           >> $jdl
           echo ' '                                                >> $jdl  
         done
+        if [ `(echo $lFailSeeds | wc | awk '{print $1}')` -gt 0 ] ; then
+          BadSeeds=$BaseDir'/'$requestID'.badseeds'
+          touch $BadSeeds
+          for iSeed in $lFailSeeds ; do
+            echo $iSeed >> $BadSeeds
+            nJobs=`(expr $nJobs + 1)`
+            iJob=`(expr $nJobs - 1)`
+            echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+            echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+            echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+            echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+            echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+            echo 'Arguments = '$iJob                                >> $jdl
+            echo 'Queue '                                           >> $jdl
+            echo ' '                                                >> $jdl
+          done
+        fi 
+
         res=`(condor_submit $jdl)`
         echo $res
         NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
