@@ -350,7 +350,8 @@ extsub_lhe()
     mkdir -p $WFWorkArea
     cp /dev/null $lockFile
     cp /dev/null $actiFile
-    echo $dir $lhein NULL $nJobs $extsub >> $actiFile
+    taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
+    echo $dir $lhein $taskID $nJobs $extsub >> $actiFile
 
   else
     echo '[LHEProd::Extsub] ERROR: Unknown External Site : '$extsub
@@ -508,13 +509,16 @@ sta_lhe()
        diff $difjoblist $filjoblists | grep "<" | awk '{print $2}' > $badjoblist  
 
        if [ -f $BadSeeds ] ; then
+         BadSeedJob=`(mktemp)`
          BadSeedJobs=`(mktemp)`
          for iSeed in `(cat $BadSeeds)` ; do
            iJob=`(expr $iSeed - $SEEDOffset)`
-           echo $iJob >> $BadSeedJobs 
+           echo $iJob >> $BadSeedJob 
          done
+         sort -n $BadSeedJob >> $BadSeedJobs
          lFailed=`(diff $badjoblist $BadSeedJobs | grep "<" | awk '{print $2}')`
          diff $badjoblist $BadSeedJobs
+         rm $BadSeedJob
          rm $BadSeedJobs
        else
          lFailed=`(diff $difjoblist $filjoblists | grep "<" | awk '{print $2}')`
@@ -582,6 +586,11 @@ sta_lhe()
 check_nevt()
 {
 
+  if [ "$lhein" == "NULL" ] ; then
+    echo "[LHEProd::CheckNevt] ERROR: <lheID> not specified "
+    exit
+  fi
+
   lheact=$lhein
   activeLHE=`(find . | grep ".active")`
   for iLHE in $activeLHE ; do
@@ -645,6 +654,12 @@ check_nevt()
 
 resub_lhe()
 {
+
+  if [ "$lhein" == "NULL" ] ; then
+    echo "[LHEProd::Resub] ERROR: <lheID> not specified "
+    exit
+  fi
+
   lheact=$lhein
   activeLHErsb=`(find . | grep ".active")`
   for iLHErsb in $activeLHErsb ; do
@@ -919,6 +934,11 @@ sync_lhe()
     exit
   fi
 
+  if [ "$lhein" == "NULL" ] ; then
+    echo "[LHEProd::Sync] ERROR: <lheID> not specified "
+    exit
+  fi 
+
   lheact=$lhein
   activeLHE=`(find . | grep ".active")`
   for iLHEsnc in $activeLHE ; do 
@@ -939,6 +959,7 @@ sync_lhe()
     read a
     if [ "$a" == "y" ] ; then
       dir=`(cat $iLHEsnc | awk '{print $1}')`
+      taskID=`(cat $iLHEsnc | awk '{print $3}' | sed 's\:\ \g' )` 
       BaseDir=`pwd`'/'$dir
       LogDir=$BaseDir'/LogFiles_'$requestID'/'
       WFWorkArea=$WorkArea$requestID'/'
@@ -982,8 +1003,8 @@ sync_lhe()
         echo 'rm '$lockFile                                       >> $syncJob
         
         chmod +x $syncJob
-        echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out -J Sync $syncJob
-        bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'sync.out -J Sync $syncJob
+        echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out -J Sync$taskID $syncJob
+        bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'sync.out -J Sync$taskID $syncJob
         touch $lockFile
       else
         echo '[LHEProd::Sync] ERROR: Unknown External Site : '$extsub
