@@ -19,6 +19,23 @@ Site=`(uname -a | awk '{print $2}' | awk -F'.' '{print $2}')`
 # Site Config: CERN
 if   [ "$Site" == "cern" ] ; then
 
+  #... check AFS token
+
+  klist -5 &> /dev/null
+  if [ $? -ne  0 ] ; then 
+    echo "No AFS token, please renew it !" 
+    exit
+  fi
+
+  unixuser=`whoami`
+  afsuser=`(klist -5 2> /dev/null | grep "Default principal:" | awk -F': ' '{print $2}' | awk -F'@' '{print $1}')` 
+
+  if [ "$unixuser" !=  "$afsuser" ] ; then
+    echo "AFS token not from unix user !"
+    exit 
+  fi  
+
+  #... basix 
   queue="cmst0"
   chkqueue='1nd'
   eosBase="root://eoscms//eos/cms/store/lhe/"
