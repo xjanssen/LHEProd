@@ -19,22 +19,6 @@ Site=`(uname -a | awk '{print $2}' | awk -F'.' '{print $2}')`
 # Site Config: CERN
 if   [ "$Site" == "cern" ] ; then
 
-  #... check AFS token
-
-  klist -5 &> /dev/null
-  if [ $? -ne  0 ] ; then 
-    echo "No AFS token, please renew it !" 
-    exit
-  fi
-
-  unixuser=`whoami`
-  afsuser=`(klist -5 2> /dev/null | grep "Default principal:" | awk -F': ' '{print $2}' | awk -F'@' '{print $1}')` 
-
-  if [ "$unixuser" !=  "$afsuser" ] ; then
-    echo "AFS token not from unix user !"
-    exit 
-  fi  
-
   #... basix 
   queue="cmst0"
   chkqueue='1nd'
@@ -123,6 +107,30 @@ exit
 
 }
 
+# ------------------------ chk_afs --------------------------------------------
+chk_afs()
+{
+
+  if   [ "$Site" == "cern" ] ; then
+
+    #... check AFS token
+
+    klist -5 &> /dev/null
+    if [ $? -ne  0 ] ; then 
+      echo "No AFS token, please renew it !" 
+      exit
+    fi
+
+    unixuser=`whoami`
+    afsuser=`(klist -5 2> /dev/null | grep "Default principal:" | awk -F': ' '{print $2}' | awk -F'@' '{print $1}')` 
+
+    if [ "$unixuser" !=  "$afsuser" ] ; then
+      echo "AFS token not from unix user !"
+      exit 
+    fi  
+  fi
+}
+
 # ------------------------  LOAD CFG --------------------------------------------
 parse_config()
 {
@@ -172,6 +180,7 @@ parse_config()
 # ------------------------  INJECT WORKFLOW(s) -------------------------------------
 inj_lhe()
 {
+
   if [ "$tgz" == "NULL" ] ; then
     echo '[LHEProd::Inject] ERROR tgz not specified'
     exit
@@ -213,6 +222,7 @@ inj_lhe()
 sub_lhe()
 {
 
+# chk_afs
   PWD=`pwd`
   BaseDir=`pwd`'/'$dir 
   lockFile=$BaseDir'/'$requestID'.lock'
@@ -342,6 +352,7 @@ sub_lhe()
 extsub_lhe()
 {
 
+  chk_afs
   lhe=$lhein
   parse_config
 
@@ -534,7 +545,7 @@ sta_lhe()
          done
          sort -n $BadSeedJob >> $BadSeedJobs
          lFailed=`(diff $badjoblist $BadSeedJobs | grep "<" | awk '{print $2}')`
-         diff $badjoblist $BadSeedJobs
+#        diff $badjoblist $BadSeedJobs
          rm $BadSeedJob
          rm $BadSeedJobs
        else
@@ -602,7 +613,8 @@ sta_lhe()
 # ------------------------ Check #evt ---------------------------------------------
 check_nevt()
 {
-
+ 
+  chk_afs
   if [ "$lhein" == "NULL" ] ; then
     echo "[LHEProd::CheckNevt] ERROR: <lheID> not specified "
     exit
@@ -672,6 +684,7 @@ check_nevt()
 resub_lhe()
 {
 
+  chk_afs
   if [ "$lhein" == "NULL" ] ; then
     echo "[LHEProd::Resub] ERROR: <lheID> not specified "
     exit
@@ -832,6 +845,7 @@ kill_lhe()
 
 add_lhejob()
 {
+  chk_afs
 
   if [ "$lhein" == "NULL" ] ; then
     echo "[LHEProd::AddJob] ERROR: <lheID> not specified "
@@ -946,6 +960,7 @@ clean_afs_log()
 sync_lhe()
 {
 
+  chk_afs
   if [ "$Site" != "cern" ] ; then
     echo '[LHEProd::Sync] ERROR: External WF only possible at CERN master node'
     exit
