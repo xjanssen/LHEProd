@@ -20,13 +20,18 @@ Site=`(uname -a | awk '{print $2}' | awk -F'.' '{print $2}')`
 if   [ "$Site" == "cern" ] ; then
 
   #... basix 
-  queue="cmst0"
+  #queue="cmst0"
+  queue="2nd"
   chkqueue='1nd'
   eosBase="root://eoscms//eos/cms/store/lhe/"
   LsfOutDir="LsfOutDir"
   mkdir -p $LsfOutDir
   WorkArea=$HOME"/scratch0/LHEProdWorkArea/"
   mkdir -p $WorkArea
+
+  BJOBS='ssh lxplus bjobs 2> /dev/null'
+  BSUB='ssh lxplus bsub'
+  #BSUB='bsub'
 
   #... sync
   source /afs/cern.ch/cms/LCG/LCG-2/UI/cms_ui_env.sh
@@ -143,6 +148,7 @@ parse_config()
 
   # Get LHE config line
   grep $lhein $cfg -q &&  cfgline=`(cat $cfg | grep $lhein)` || exit  
+  #echo $cfgline
 
   # Decode info
   
@@ -174,6 +180,7 @@ parse_config()
   echo '---------------------------------------'
   echo
   
+  return
 
 }
 
@@ -206,14 +213,14 @@ inj_lhe()
       y) echo "... Submitting ..." ; sub_lhe ; continue ;;
       *) echo "... NOT Submitting ..." ;;
     esac  
-    if [ "$Site" == "cern" ] ; then
-      echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
-      read a
-      case $a in
-        y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
-        *) echo "... NOT Registering ..." ;;
-      esac  
-    fi
+#    if [ "$Site" == "cern" ] ; then
+#      echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
+#      read a
+#      case $a in
+#        y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
+#        *) echo "... NOT Registering ..." ;;
+#      esac  
+#    fi
 
   done
 }
@@ -256,16 +263,18 @@ sub_lhe()
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
   echo ' '                                                  >> $submit
+  echo 'export SCRAM_ARCH=slc5_amd64_gcc434'                >> $submit
   if [ "$Site" == "fnal" ] ; then
-    echo 'export SCRAM_ARCH=slc5_amd64_gcc434'              >> $submit
     echo 'source /uscmst1/prod/sw/cms/shrc uaf'             >> $submit
-    echo 'scramv1 project CMSSW CMSSW_'$Release             >> $submit
-    echo 'cd CMSSW_'$Release'/src'                          >> $submit 
-    echo 'eval `scramv1 runtime -sh`'                       >> $submit
-    echo 'cd -'                                             >> $submit 
-  elif   [ "$Site" == "cern" ] ; then
-    echo 'source $HOME/EVAL_SH64 '$Release                  >> $submit
+  fi 
+  echo 'scramv1 project CMSSW CMSSW_'$Release               >> $submit
+  echo 'cd CMSSW_'$Release'/src'                            >> $submit 
+  echo 'eval `scramv1 runtime -sh`'                         >> $submit
+  if [ $tarball -gt 0 ] ; then
+    echo 'cvs co -r V00-07-00 GeneratorInterface/LHEInterface ' >> $submit
   fi
+  echo 'scramv1 b'                                          >> $submit
+  echo 'cd -'                                               >> $submit 
   echo ' '                                                  >> $submit
   if [ "$Site" == "fnal" ] ; then
     echo "cp $pyCfg"' temp_${INPUT}.py'                     >> $submit
@@ -337,7 +346,7 @@ sub_lhe()
     taskID=`(mktemp -p $PWD -t .XXX | awk -F'.' '{print $2}')`
     for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
       echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-           bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+           $BSUB -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.out -J $taskID"_"$iJob $submit $iJob
     done 
   else
     echo '[LHEProd::Submit] ERROR Unknown Site:' $Site
@@ -402,15 +411,15 @@ sta_lhe()
   echo '   Load average   :'$load  
   echo "--------------------------------------------------------------------"
   if [ "$Site" == "cern" ] ; then
-    nRunTot=`(bjobs  | grep "RUN"  | wc | awk '{print $1}')`
-    nRunQDet=`(bjobs  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
-    nPendTot=`(bjobs | grep "PEND" | wc | awk '{print $1}')`
-    nPendQDet=`(bjobs  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    nRunTot=`($BJOBS  | grep "RUN"  | wc | awk '{print $1}')`
+    nRunQDet=`($BJOBS  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    nPendTot=`($BJOBS | grep "PEND" | wc | awk '{print $1}')`
+    nPendQDet=`($BJOBS  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
     echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
     echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
-    nSync=`(bjobs  | grep "Sync" | wc | awk '{print $1}')`
-    nSyncR=`(bjobs  | grep "Sync" | grep "RUN" | wc | awk '{print $1}')`
-    nSyncP=`(bjobs  | grep "Sync" | grep "PEND" | wc | awk '{print $1}')`
+    nSync=`($BJOBS  | grep "Sync" | wc | awk '{print $1}')`
+    nSyncR=`($BJOBS  | grep "Sync" | grep "RUN" | wc | awk '{print $1}')`
+    nSyncP=`($BJOBS  | grep "Sync" | grep "PEND" | wc | awk '{print $1}')`
     echo '   # Sync    Jobs : '$nSync ' [ Running : '$nSyncR' / Pending : '$nSyncP' ]'
   elif [ "$Site" == "fnal" ] ; then
     nRunTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
@@ -442,10 +451,10 @@ sta_lhe()
     nRun=0
     nPend=0 
     if [ "$Site" == "cern" ] && [ "$runSite" == "cern" ] ; then
-      lJobs=`(bjobs | grep $taskID'_' | grep "RUN" | awk '{print $7}' | awk -F "_" '{print $2}')`
-      lJobs=$lJobs' '`(bjobs | grep $taskID'_' | grep "PEND" | awk '{print $6}' | awk -F "_" '{print $2}')`
-      nRun=`(bjobs  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
-      nPend=`(bjobs | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
+      lJobs=`($BJOBS | grep $taskID'_' | grep "RUN" | awk '{print $7}' | awk -F "_" '{print $2}')`
+      lJobs=$lJobs' '`($BJOBS | grep $taskID'_' | grep "PEND" | awk '{print $6}' | awk -F "_" '{print $2}')`
+      nRun=`($BJOBS  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
+      nPend=`($BJOBS | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     elif [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ; then
       for itaskID in $taskID ; do
         lJobsTmp=`(condor_q | grep $itaskID'.' | awk '{print $1}' )`
@@ -673,7 +682,7 @@ check_nevt()
     echo '... Running file check in bkgd ... you will receive an email ...' 
  
     #echo $submit
-    bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'chkevt.out -J ChkEv$taskID $submit 
+    $BSUB -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"chkevt.out -J ChkEv$taskID $submit 
     #nohup $submit &> /dev/null &
 
   done
@@ -721,7 +730,7 @@ resub_lhe()
       if [ "$Site" == "cern" ] ; then
         for iJob in $lFailedJobs ; do
           echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
-               bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+               $BSUB -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
         done
 
         
@@ -733,7 +742,7 @@ resub_lhe()
             nJobs=`(expr $nJobs + 1)`
             iJob=$nJobs
             echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
-                 bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
+                 $BSUB -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.resub.out -J $taskID"_"$iJob $submit $iJob
           done
           echo $dir $lhein $OldtaskID $nJobs $Site > $iLHErsb
         fi 
@@ -830,7 +839,7 @@ kill_lhe()
       *) exit ;;
     esac
     if [ "$Site" == "cern" ] ; then
-      bjobs | grep $taskID'_' | awk '{print $1}' | xargs -n 1 bkill 
+      $BJOBS | grep $taskID'_' | awk '{print $1}' | xargs -n 1 bkill 
     elif [ "$Site" == "fnal" ] ; then
       for itaskID in $taskID ; do
         condor_rm $itaskID
@@ -880,7 +889,7 @@ add_lhejob()
       nJobs=`(expr $nJobs + $addjob )`
       for (( iJob=$iJobStart ; iJob<=$nJobs ; ++iJob )) ; do  
         echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
-             bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
+             $BSUB -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.out -J $taskID"_"$iJob $submit $iJob
       done 
       echo $dir $lhe $taskID $nJobs $Site > $iLHEadd
     elif [ "$Site" == "fnal" ] ; then
@@ -1036,7 +1045,7 @@ sync_lhe()
         
         chmod +x $syncJob
         echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out -J Sync$taskID $syncJob
-        bsub -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset'_'sync.out -J Sync$taskID $syncJob
+        $BSUB -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset"_"sync.out -J Sync$taskID $syncJob
         touch $lockFile
       else
         echo '[LHEProd::Sync] ERROR: Unknown External Site : '$extsub
@@ -1121,6 +1130,7 @@ sync=0
 
 nJobMax=0
 iJobStart=1
+tarball=0
 
 FindFailedJob=0
 
@@ -1131,6 +1141,7 @@ for arg in $* ; do
     -lhe)    lhein=$2      ; shift ; shift ;;
     -inject) inj=1                 ; shift ;;
     -submit) sub=1                 ; shift ;;
+    -tarball) tarball=1            ; shift ;;
     -extsub) extsub=$2     ; shift ; shift ;;
     -njmax)  nJobMax=$2    ; shift ; shift ;;
     -jstart) iJobStart=$2  ; shift ; shift ;;
