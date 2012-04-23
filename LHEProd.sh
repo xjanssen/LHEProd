@@ -30,8 +30,9 @@ if   [ "$Site" == "cern" ] ; then
   mkdir -p $WorkArea
 
   BJOBS='ssh lxplus bjobs 2> /dev/null'
+  BJOBS='bjobs '
   BSUB='ssh lxplus bsub'
-  #BSUB='bsub'
+  BSUB='bsub'
 
   #... sync
   source /afs/cern.ch/cms/LCG/LCG-2/UI/cms_ui_env.sh
@@ -110,6 +111,23 @@ echo "$Manual"
 echo
 exit
 
+}
+
+# ------------------------ get first seed -------------------------------------
+get_first_seed()
+{
+  SEEDOffset="10000"
+  touch FirstSeedList.txt
+# FirstSeed=$RANDOM
+  FirstSeed=`python getrandom.py`
+  while grep -q "$FirstSeed" FirstSeedList.txt ; do
+#   FirstSeed=$RANDOM
+    FirstSeed=`python getrandom.py`
+  done  
+  echo $FirstSeed >> FirstSeedList.txt
+  SEEDOffset=`(expr $FirstSeed + $SEEDOffset)`
+  echo $FirstSeed 
+  echo $SEEDOffset
 }
 
 # ------------------------ chk_afs --------------------------------------------
@@ -230,6 +248,7 @@ sub_lhe()
 {
 
 # chk_afs
+  
   PWD=`pwd`
   BaseDir=`pwd`'/'$dir 
   lockFile=$BaseDir'/'$requestID'.lock'
@@ -247,6 +266,7 @@ sub_lhe()
     *) exit ;;
   esac 
 
+  get_first_seed
   LogDir=$BaseDir'/LogFiles_'$requestID'/'
   mkdir -p $LogDir
   WFWorkArea=$WorkArea$requestID'/'
@@ -263,7 +283,8 @@ sub_lhe()
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
   echo ' '                                                  >> $submit
-  echo 'export SCRAM_ARCH=slc5_amd64_gcc434'                >> $submit
+  #echo 'export SCRAM_ARCH=slc5_amd64_gcc434'                >> $submit
+  echo 'export SCRAM_ARCH=slc5_amd64_gcc462'                >> $submit
   if [ "$Site" == "fnal" ] ; then
     echo 'source /uscmst1/prod/sw/cms/shrc uaf'             >> $submit
   fi 
@@ -271,7 +292,8 @@ sub_lhe()
   echo 'cd CMSSW_'$Release'/src'                            >> $submit 
   echo 'eval `scramv1 runtime -sh`'                         >> $submit
   if [ $tarball -gt 0 ] ; then
-    echo 'cvs co -r V00-07-00 GeneratorInterface/LHEInterface ' >> $submit
+    #echo 'cvs co -r V00-07-08 GeneratorInterface/LHEInterface ' >> $submit
+    echo 'cvs co -r V00-07-10 GeneratorInterface/LHEInterface/data ' >> $submit
   fi
   echo 'scramv1 b'                                          >> $submit
   echo 'cd -'                                               >> $submit 
@@ -354,7 +376,7 @@ sub_lhe()
   fi
   cp /dev/null $lockFile
   cp /dev/null $actiFile
-  echo $dir $lhein $taskID $nJobs $Site >> $actiFile
+  echo $dir $lhein $taskID $nJobs $Site $SEEDOffset >> $actiFile
 } 
 
 # ------------------------ EXTERNAL WF REGISTRATION -----------------------------
@@ -447,6 +469,10 @@ sta_lhe()
     taskID=`(cat $iLHE | awk '{print $3}' | sed 's\:\ \g' )`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
     runSite=`(cat $iLHE | awk '{print $5}')`
+    FirstSeedOffSet=`(cat $iLHE | awk '{print $6}')`
+    if [ -n "$FirstSeedOffSet" ]; then
+      SEEDOffset=$FirstSeedOffSet
+    fi
     lJobs=""
     nRun=0
     nPend=0 
@@ -1142,6 +1168,7 @@ for arg in $* ; do
     -inject) inj=1                 ; shift ;;
     -submit) sub=1                 ; shift ;;
     -tarball) tarball=1            ; shift ;;
+    -queue)  queue=$2      ; shift ; shift ;;
     -extsub) extsub=$2     ; shift ; shift ;;
     -njmax)  nJobMax=$2    ; shift ; shift ;;
     -jstart) iJobStart=$2  ; shift ; shift ;;
