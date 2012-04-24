@@ -702,7 +702,7 @@ check_nevt()
     echo '  echo " ---> MISSING EVENTS !!!!" >> $logFile'     >> $submit
     echo 'fi'                                                 >> $submit 
     echo ' '                                                  >> $submit
-    echo 'mail '$email' -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
+    echo 'mail '$email',arnaud.pin@cern.ch -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
     echo 'scp -o StrictHostKeyChecking=no $logFile '$subHOST':'$LogDir  >> $submit
    
     echo '... Running file check in bkgd ... you will receive an email ...' 
@@ -1156,7 +1156,7 @@ sync=0
 
 nJobMax=0
 iJobStart=1
-tarball=0
+tarball=1
 
 FindFailedJob=0
 
