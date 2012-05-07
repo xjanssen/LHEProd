@@ -283,7 +283,6 @@ sub_lhe()
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
   echo ' '                                                  >> $submit
-  #echo 'export SCRAM_ARCH=slc5_amd64_gcc434'                >> $submit
   echo 'export SCRAM_ARCH=slc5_amd64_gcc462'                >> $submit
   if [ "$Site" == "fnal" ] ; then
     echo 'source /uscmst1/prod/sw/cms/shrc uaf'             >> $submit
@@ -293,7 +292,8 @@ sub_lhe()
   echo 'eval `scramv1 runtime -sh`'                         >> $submit
   if [ $tarball -gt 0 ] ; then
     #echo 'cvs co -r V00-07-08 GeneratorInterface/LHEInterface ' >> $submit
-    echo 'cvs co -r V00-07-10 GeneratorInterface/LHEInterface/data ' >> $submit
+    echo 'cvs co -r V00-07-10 GeneratorInterface/LHEInterface ' >> $submit
+    #echo 'cvs co -r V00-07-11 GeneratorInterface/LHEInterface ' >> $submit
   fi
   echo 'scramv1 b'                                          >> $submit
   echo 'cd -'                                               >> $submit 
@@ -565,6 +565,7 @@ sta_lhe()
        done 
        filjoblists=`(mktemp)`
        sort -n $filjoblist >> $filjoblists
+       
 
        difjoblist=`(mktemp)`
        diff $expjoblists $subjoblists | grep "<" | awk '{print $2}' > $difjoblist
@@ -745,6 +746,10 @@ resub_lhe()
     sta_lhe 
     dir=`(cat $iLHErsb | awk '{print $1}')`
     nJobs=`(cat $iLHErsb | awk '{print $4}')`
+    FirstSeedOffSet=`(cat $iLHE | awk '{print $6}')`
+    if [ -n "$FirstSeedOffSet" ]; then
+      SEEDOffset=$FirstSeedOffSet
+    fi
     echo $iLHErsb $lhein $dir $nJobs
     echo -en "[LHEProd::Inject] INFO : Do you want to re-submit this WorkFlow ? [y/n] "
     read a
@@ -770,7 +775,7 @@ resub_lhe()
             echo bsub -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.resub.out -J $taskID'_'$iJob $submit $iJob
                  $BSUB -sp 60 -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.resub.out -J $taskID"_"$iJob $submit $iJob
           done
-          echo $dir $lhein $OldtaskID $nJobs $Site > $iLHErsb
+          echo $dir $lhein $OldtaskID $nJobs $Site $SEEDOffset > $iLHErsb
         fi 
       elif [ "$Site" == "fnal" ] ; then 
         jdl=$WFWorkArea$requestID'.resub.jdl'
@@ -819,7 +824,7 @@ resub_lhe()
         res=`(condor_submit $jdl)`
         echo $res
         NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
-        echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site > $iLHErsb
+        echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site $SEEDOffset > $iLHErsb
         joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
         cp /dev/null $joblist
         i=0   
@@ -906,6 +911,11 @@ add_lhejob()
     parse_config
     dir=`(cat $iLHEadd | awk '{print $1}')`
     nJobs=`(cat $iLHEadd | awk '{print $4}')`
+    FirstSeedOffSet=`(cat $iLHEadd | awk '{print $6}')`
+    if [ -n "$FirstSeedOffSet" ]; then
+      SEEDOffset=$FirstSeedOffSet
+    fi
+
     WFWorkArea=$WorkArea$requestID'/'
     submit=$WFWorkArea$requestID'.sub'
 
@@ -917,7 +927,7 @@ add_lhejob()
         echo bsub -u $email -q $queue -o $WFWorkArea$Dataset'_'$taskID'_'$iJob.out -J $taskID'_'$iJob $submit $iJob
              $BSUB -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.out -J $taskID"_"$iJob $submit $iJob
       done 
-      echo $dir $lhe $taskID $nJobs $Site > $iLHEadd
+      echo $dir $lhe $taskID $nJobs $Site $SEEDOffset > $iLHEadd
     elif [ "$Site" == "fnal" ] ; then
       # New Start / Stop range
       iJobStart=$nJobs
@@ -951,7 +961,7 @@ add_lhejob()
       res=`(condor_submit $jdl)`
       echo $res
       NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
-      echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site > $iLHEadd
+      echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site $SEEDOffset > $iLHEadd
       joblist=$dir'/'$lhein'.'$NewtaskID'.joblist'
       cp /dev/null $joblist
       i=0
