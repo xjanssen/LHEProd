@@ -561,13 +561,19 @@ sta_lhe()
       fi
     fi
     lhein=$lhe
+    requestID=`(cat $iLHE | awk '{print $2}')`
     taskID=`(cat $iLHE | awk '{print $3}' | sed 's\:\ \g' )`
     nSubmit=`(cat $iLHE | awk '{print $4}')`    
     runSite=`(cat $iLHE | awk '{print $5}')`
     FirstSeedOffSet=`(cat $iLHE | awk '{print $6}')`
+    #echo $FirstSeedOffSet $iLHE
     if [ -n "$FirstSeedOffSet" ]; then
       SEEDOffset=$FirstSeedOffSet
     fi
+    WFWorkArea=$WorkArea$requestID'/'
+    submit=$WFWorkArea$requestID'.sub'
+    #cat $submit | grep "SEED=" | awk -F"+ " '{print $2}' | awk -F")" '{print $1}' | sed 's\ \\g'
+    SEEDOffset=`(cat $submit | grep "SEED=" | awk -F"+ " '{print $2}' | awk -F")" '{print $1}' )` 
     lJobs=""
     nRun=0
     nPend=0 
@@ -659,13 +665,23 @@ sta_lhe()
 
        filjoblist=`(mktemp)`    
        for iFile in $lFiles ; do  
+#        echo $iFile
          SEED=`(echo $iFile | awk -F'_' '{print $NF}' | awk -F'.' '{print $1}')`
+#        echo $SEED
          iJob=`(expr $SEED - $SEEDOffset)`
+#        echo $iJob
          echo $iJob >> $filjoblist     
        done 
+#      echo $SEEDOffset
        filjoblists=`(mktemp)`
        sort -n $filjoblist >> $filjoblists
-       
+      
+#      echo All Jobs:
+#      cat $expjoblists 
+#      echo Run Jobs:
+#      cat $subjoblists
+#      echo END Jobs:
+#      cat $filjoblists
 
        difjoblist=`(mktemp)`
        diff $expjoblists $subjoblists | grep "<" | awk '{print $2}' > $difjoblist
