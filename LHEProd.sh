@@ -13,6 +13,10 @@ SEEDOffset="10000"
 WFDir="WorkFlows/"
 mkdir -p $WFDir
 
+# Config freezer "a la" CRAB
+FRZCFG=`pwd`'/freeze_config.py'
+
+
 # Get Site
 Site=`(uname -a | awk '{print $2}' | awk -F'.' '{print $2}')`
 
@@ -39,15 +43,29 @@ if   [ "$Site" == "cern" ] ; then
   globusDir=`pwd`'/.globus'
   fnalsrm='srm://cmseos.fnal.gov:8443/srm/v2/server?SFN='
   fnaleos='/eos/uscms/store/lhe'
+  unlsrm='srm://srm.unl.edu:8443/srm/v2/server?SFN='
+  unleos="/mnt/hadoop/user/uscms01/pnfs/unl.edu/data4/cms/store/user/xjanssen/lhe/"
+
 
 # Site Config: FNAL
 elif [ "$Site" == "fnal" ] ; then
 
   #fnaluser='xjanssen'
+  luser=`whoami`
   fnaluser=`(klist 2> /dev/null | grep "Default principal:" | awk -F': ' '{print $2}' | awk -F'@' '{print $1}')`
   eosBase="root://cmseos:1094//eos/uscms/store/lhe/"
   WorkArea="/storage/local/data1/cmsdataops/lhe/LHEProdWorkArea/"
   mkdir -p $WorkArea
+
+
+# Site Config: UNL (Omaha/Nebraska)
+elif [ "$Site" == "unl" ] ; then
+
+  luser=`whoami`
+  WorkArea="/home/bockelman/xjanssen/LHEProdWorkArea/"
+  mkdir -p $WorkArea 
+  eosBase="/mnt/hadoop/user/uscms01/pnfs/unl.edu/data4/cms/store/user/xjanssen/lhe/"
+  mkdir -p $eosBase
 
 # Site Config: Unknown ?
 else
@@ -174,9 +192,14 @@ parse_config()
   Release=`(echo $cfgline | awk '{print $2}' | awk -F'CMSSW_' '{print $2}')`
   Events=`(echo $cfgline | awk '{print $5}')`
   Dataset=`(echo $cfgline | awk '{print $10}')`
-  pyCfg=`(echo $cfgline | awk '{print $13}')`
-  eosnum=`(echo $cfgline | awk '{print $14}')`
+#  pyCfg=`(echo $cfgline | awk '{print $13}')`
+#  eosnum=`(echo $cfgline | awk '{print $14}')`
+  pyCfg=`(echo $cfgline | awk '{print $12}')`
+  eosnum=`(echo $cfgline | awk '{print $13}')`
   eosDir=$eosBase$eosnum
+
+  FRZpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py"}')`
+  PKLpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py.pkl"}')`
 
   EvtJob=`(cat $dir'/'$pyCfg | grep maxEvents | grep "cms.untracked.int32" | awk -F"int32" '{print $2}' | sed 's:(::' | sed 's:)::g' | sed 's: ::g')` 
   nJobs=$(( $Events / $EvtJob )) 
@@ -231,14 +254,20 @@ inj_lhe()
       y) echo "... Submitting ..." ; sub_lhe ; continue ;;
       *) echo "... NOT Submitting ..." ;;
     esac  
-#    if [ "$Site" == "cern" ] ; then
+    if [ "$Site" == "cern" ] ; then
 #      echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at FNAL ? [y/n] " 
 #      read a
 #      case $a in
 #        y) echo "... Registering ..." ; extsub="fnal" ; extsub_lhe ;;
 #        *) echo "... NOT Registering ..." ;;
 #      esac  
-#    fi
+      echo -en "[LHEProd::Inject] INFO : Do you want to Register this WorkFlow at UNL ? [y/n] " 
+      read a
+      case $a in
+        y) echo "... Registering ..." ; extsub="unl" ; extsub_lhe ;;
+        *) echo "... NOT Registering ..." ;;
+      esac
+    fi
 
   done
 }
@@ -275,10 +304,33 @@ sub_lhe()
   cp /dev/null $submit
   cp $dir'/'$pyCfg $WFWorkArea
 
+  LHEIntVer="V00-07-14"
+  if [ "$Site" == "unl" ] ; then 
+    mkdir -p $eosDir
+    cd $WFWorkArea
+    source /opt/osg/app/cmssoft/cms/cmsset_default.sh
+    export SCRAM_ARCH=slc5_amd64_gcc462
+    scramv1 project CMSSW CMSSW_$Release
+    cd CMSSW_$Release/src  
+    if [ $tarball -gt 0 ] ; then
+      cvs co -r $LHEIntVer GeneratorInterface/LHEInterface 
+    fi
+    eval `scramv1 runtime -sh`
+    scramv1 b
+    cd -
+    tar czf CVSPatch.tgz CMSSW_$Release/src CMSSW_$Release/bin CMSSW_$Release/lib CMSSW_$Release/python 
+    #FRZpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py"}')`
+    #PKLpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py.pkl"}')`
+    $FRZCFG $pyCfg $FRZpyCfg 
+  fi
   subHOST=`hostname`
- 
+
   echo '#!/bin/sh'                                          >> $submit
-  echo 'let R=$RANDOM%1200+1 ; sleep $R'                    >> $submit
+  if [ "$Site" == "unl" ] ; then
+    echo 'export http_proxy=http://red-squid2.unl.edu:3128' >> $submit  
+  else
+    echo 'let R=$RANDOM%1200+1 ; sleep $R'                  >> $submit
+  fi
   echo ' '                                                  >> $submit
   echo 'export INPUT=$1 '                                   >> $submit
   echo 'SEED=`(expr $INPUT + '$SEEDOffset')`'               >> $submit
@@ -287,28 +339,49 @@ sub_lhe()
   if [ "$Site" == "fnal" ] ; then
     echo 'source /uscmst1/prod/sw/cms/shrc uaf'             >> $submit
   fi 
-  echo 'scramv1 project CMSSW CMSSW_'$Release               >> $submit
-  echo 'cd CMSSW_'$Release'/src'                            >> $submit 
-  echo 'eval `scramv1 runtime -sh`'                         >> $submit
-  if [ $tarball -gt 0 ] ; then
-    #echo 'cvs co -r V00-07-08 GeneratorInterface/LHEInterface ' >> $submit
-    echo 'cvs co -r V00-07-10 GeneratorInterface/LHEInterface ' >> $submit
-    #echo 'cvs co -r V00-07-11 GeneratorInterface/LHEInterface ' >> $submit
+  if [ "$Site" == "unl" ] ; then
+    echo 'source $OSG_APP/cmssoft/cms/cmsset_default.sh'      >> $submit
+    echo 'scramv1 project CMSSW CMSSW_'$Release               >> $submit
+    echo 'tar xzf CVSPatch.tgz'                               >> $submit
+    echo 'cd CMSSW_'$Release'/src'                            >> $submit
+    echo 'eval `scramv1 runtime -sh`'                         >> $submit
+    echo 'cd -'                                               >> $submit 
+  else
+    echo 'scramv1 project CMSSW CMSSW_'$Release               >> $submit
+    echo 'cd CMSSW_'$Release'/src'                            >> $submit 
+    echo 'eval `scramv1 runtime -sh`'                         >> $submit
+    if [ $tarball -gt 0 ] ; then
+      if [ "$Site" == "unl" ] ; then
+        echo 'tar xzf ../../CVSPatch.tgz'                     >> $submit
+      else
+        echo 'cvs co -r '$LHEIntVer' GeneratorInterface/LHEInterface ' >> $submit
+      fi
+    fi
+    echo 'scramv1 b'                                          >> $submit
+    echo 'cd -'                                               >> $submit 
   fi
-  echo 'scramv1 b'                                          >> $submit
-  echo 'cd -'                                               >> $submit 
   echo ' '                                                  >> $submit
   if [ "$Site" == "fnal" ] ; then
     echo "cp $pyCfg"' temp_${INPUT}.py'                     >> $submit
+  elif   [ "$Site" == "unl" ] ; then
+    echo "cp $FRZpyCfg"' temp_${INPUT}.py'                     >> $submit 
   elif   [ "$Site" == "cern" ] ; then
     echo "cp $WFWorkArea$pyCfg"' temp_${INPUT}.py'          >> $submit
   fi
-  echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
-  echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
+  #echo 'sed -ie  s/1111111/${SEED}/ temp_${INPUT}.py'       >> $submit
+  echo 'sed -ie  "s/initialSeed =.*/initialSeed = ${SEED}/" temp_${INPUT}.py' >> $submit
+  if [ "$Site" == "unl" ] ; then
+    echo 'cmsRun temp_${INPUT}.py'                          >> $submit             
+  else
+    echo 'cmsRun temp_${INPUT}.py &> '$Dataset'_${INPUT}.log' >> $submit 
+    echo 'tar czf '$Dataset'_${INPUT}.log.tgz '$Dataset'_${INPUT}.log' >> $submit       
+  fi
   echo ' '                                                  >> $submit
+  if [ "$Site" == "unl" ] ; then
+    echo 'let R=$RANDOM%1200+1 ; sleep $R'                  >> $submit
+  fi 
   echo 'ls -l'                                              >> $submit 
   echo ' '                                                  >> $submit
-  echo 'tar czf '$Dataset'_${INPUT}.log.tgz '$Dataset'_${INPUT}.log' >> $submit       
   if [ "$Site" == "fnal" ] ; then
     echo 'xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
     echo 'if [ $? -ne 0 ] ; then'                           >> $submit
@@ -319,13 +392,16 @@ sub_lhe()
     echo '    xrdcp -d 2 output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit
     echo '  fi'                                             >> $submit
     echo 'fi'                                               >> $submit    
+  elif [ "$Site" == "unl" ] ; then 
+    # protect condor transfer_remaps against missing output.lhe file at Omaha  
+    echo 'touch output.lhe'                                 >> $submit
   elif [ "$Site" == "cern" ] ; then
     echo 'scp -o StrictHostKeyChecking=no '$Dataset'_${INPUT}.log.tgz '$subHOST':'$LogDir'/.'  >> $submit
     echo 'xrdcp -np output.lhe '$eosDir'/'$Dataset'_${SEED}.lhe' >> $submit 
   fi
   chmod +x $submit
 
-  if [ "$Site" == "fnal" ] ; then
+  if [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
     # FNAL: Need to create EosDir 
     #ssh $fnaluser@cmslpc-sl5 whoami
     #ssh $fnaluser@cmslpc-sl5 mkdir /eos/uscms/store/lhe/$eosnum
@@ -335,15 +411,25 @@ sub_lhe()
     jdl=$WFWorkArea$requestID'.jdl'
     cp /dev/null $jdl 
     echo 'universe = vanilla'                               >> $jdl    
-    echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
-    echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
-    echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+    if [ "$Site" == "fnal" ] ; then
+      echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+      echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+      echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+    fi
     echo 'Executable = '$submit                             >> $jdl
     echo 'should_transfer_files = YES'                      >> $jdl
     echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
-    echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
-    echo 'transfer_output_files = '$Dataset'_$(process).log.tgz' >> $jdl
-    echo 'transfer_output_remaps = "'$Dataset'_$(process).log.tgz = '$LogDir'/'$Dataset'_$(process).log.tgz"' >> $jdl
+    if [ "$Site" == "unl" ] ; then
+      #echo 'transfer_input_files = '$WFWorkArea$pyCfg','$WFWorkArea'CVSPatch.tgz'  >> $jdl
+      echo 'transfer_input_files = '$WFWorkArea$FRZpyCfg','$WFWorkArea$PKLpyCfg','$WFWorkArea'CVSPatch.tgz'  >> $jdl
+      echo 'transfer_output_files = output.lhe' >> $jdl
+#     echo 'transfer_output_files = '$Dataset'_$(process).log.tgz , output.lhe' >> $jdl
+#     echo 'transfer_output_remaps = "'$Dataset'_$(process).log.tgz = '$LogDir'/'$Dataset'_$(process).log.tgz ; output.lhe = '$eosDir'/'$Dataset'_$(process).lhe"' >> $jdl
+    else
+      echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+      echo 'transfer_output_files = '$Dataset'_$(process).log.tgz' >> $jdl
+#     echo 'transfer_output_remaps = "'$Dataset'_$(process).log.tgz = '$LogDir'/'$Dataset'_$(process).log.tgz"' >> $jdl
+    fi
     echo 'stream_error = false'                             >> $jdl
     echo 'stream_output = false'                            >> $jdl
     echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_$(process).out'  >> $jdl
@@ -352,7 +438,16 @@ sub_lhe()
     echo 'notification = NEVER'                             >> $jdl
     echo 'Arguments = $(process)'                           >> $jdl
     echo 'priority = 10'                                    >> $jdl
-    echo 'Queue '$nJobs                                     >> $jdl
+    if [ "$Site" == "unl" ] ; then
+       for (( iJob=0 ; iJob<$nJobs ; iJob++ )) ; do
+         aSEED=`(expr $iJob + $SEEDOffset)`
+         echo 'transfer_output_remaps = "output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl
+         echo 'Queue '                                           >> $jdl
+       done  
+    else
+      echo 'transfer_output_remaps = "'$Dataset'_$(process).log.tgz = '$LogDir'/'$Dataset'_$(process).log.tgz"' >> $jdl 
+      echo 'Queue '$nJobs                                     >> $jdl
+    fi
 
     res=`(condor_submit $jdl)`
     echo $res
@@ -443,9 +538,9 @@ sta_lhe()
     nSyncR=`($BJOBS  | grep "Sync" | grep "RUN" | wc | awk '{print $1}')`
     nSyncP=`($BJOBS  | grep "Sync" | grep "PEND" | wc | awk '{print $1}')`
     echo '   # Sync    Jobs : '$nSync ' [ Running : '$nSyncR' / Pending : '$nSyncP' ]'
-  elif [ "$Site" == "fnal" ] ; then
-    nRunTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
-    nPendTot=`(condor_q | grep "cmsdataops" | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+  elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
+    nRunTot=`(condor_q | grep "$luser" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+    nPendTot=`(condor_q | grep "$luser" | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
     echo '   # Runing  Jobs : '$nRunTot 
     echo '   # Pending Jobs : '$nPendTot 
   else
@@ -481,11 +576,11 @@ sta_lhe()
       lJobs=$lJobs' '`($BJOBS | grep $taskID'_' | grep "PEND" | awk '{print $6}' | awk -F "_" '{print $2}')`
       nRun=`($BJOBS  | grep $taskID'_' | grep "RUN"  | wc | awk '{print $1}')`
       nPend=`($BJOBS | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
-    elif [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ; then
+    elif ( [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ) || ( [ "$Site" == "unl" ] && [ "$runSite" == "unl" ] ) ; then
       for itaskID in $taskID ; do
-        lJobsTmp=`(condor_q | grep $itaskID'.' | awk '{print $1}' )`
-        nRunTmp=`(condor_q  | grep $itaskID'.' | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
-        nPendTmp=`(condor_q | grep $itaskID'.' | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
+        lJobsTmp=`(condor_q | grep $luser | awk '{print $1}' | grep "$itaskID\." | awk '{print $1}' )`
+        nRunTmp=`(condor_q  | grep $luser | grep " R " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
+        nPendTmp=`(condor_q | grep $luser | grep " I " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
         joblist=$dir'/'$lhein'.'$itaskID'.joblist'
         for ilJobsTmp in $lJobsTmp  ; do
           lJobs=$lJobs' '`(grep $ilJobsTmp $joblist | awk '{print $2}')`    
@@ -508,6 +603,11 @@ sta_lhe()
     elif [ "$Site" == "fnal" ] ; then
       lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum 2> /dev/null)`
       nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
+    elif [ "$Site" == "unl" ] ; then
+      lFiles=`(find -L $eosDir -maxdepth 1  -type f ! -size 0 | sed "s:$eosDir::" | grep $Dataset)`
+      nFiles=`(find -L $eosDir -maxdepth 1  -type f ! -size 0 | sed "s:$eosDir::" | grep $Dataset | wc | awk '{print $1}' )`
+      #lFiles=`(ls $eosDir | grep $Dataset)`
+      #nFiles=`(ls $eosDir | grep $Dataset | wc | awk '{print $1}' )`
     fi 
     nFailed=$(($nSubmit - $nRun - $nPend - $nFiles -$nBadSeeds )) 
     if [ $nFailed -lt 0 ] ; then
@@ -536,7 +636,7 @@ sta_lhe()
        if [ "$Site" == "cern" ] ; then
          iStart=1
          iStop=$nSubmit
-       elif [ "$Site" == "fnal" ] ; then
+       elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
          iStart=0
          iStop=`(expr $nSubmit - 1)`
        else
@@ -777,25 +877,40 @@ resub_lhe()
           done
           echo $dir $lhein $OldtaskID $nJobs $Site $SEEDOffset > $iLHErsb
         fi 
-      elif [ "$Site" == "fnal" ] ; then 
+      elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then 
         jdl=$WFWorkArea$requestID'.resub.jdl'
         cp /dev/null $jdl
         echo 'universe = vanilla'                               >> $jdl
-        echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
-        echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
-        echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+        if [ "$Site" == "fnal" ] ; then
+          echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+          echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+          echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+        fi
         echo 'Executable = '$submit                             >> $jdl
         echo 'should_transfer_files = YES'                      >> $jdl
         echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
-        echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+        if [ "$Site" == "unl" ] ; then
+          echo 'transfer_input_files = '$WFWorkArea$FRZpyCfg','$WFWorkArea$PKLpyCfg','$WFWorkArea'CVSPatch.tgz'  >> $jdl
+          #echo 'transfer_input_files = '$WFWorkArea'TTJets_8TeV_madgraph_gridpack_cfg_for_workernode.py,'$WFWorkArea'TTJets_8TeV_madgraph_gridpack_cfg_for_workernode.py.pkl,'$WFWorkArea'CVSPatch.tgz'  >> $jdl
+        else
+          echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+        fi
         echo 'stream_error = false'                             >> $jdl
         echo 'stream_output = false'                            >> $jdl
         echo 'notification = NEVER'                             >> $jdl
         echo 'priority = 15'                                    >> $jdl
         echo ' '                                                >> $jdl  
         for iJob in $lFailedJobs ; do
-          echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
-          echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+          aSEED=`(expr $iJob + $SEEDOffset)`
+          if [ "$Site" == "unl" ] ; then
+            #echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz , output.lhe' >> $jdl
+            #echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz ; output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl
+            echo 'transfer_output_files = output.lhe' >> $jdl
+            echo 'transfer_output_remaps = "output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl 
+          else
+            echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+            echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+          fi
           echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
           echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
           echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
@@ -810,8 +925,14 @@ resub_lhe()
             echo $iSeed >> $BadSeeds
             nJobs=`(expr $nJobs + 1)`
             iJob=`(expr $nJobs - 1)`
-            echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
-            echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+            aSEED=`(expr $iJob + $SEEDOffset)`
+            if [ "$Site" == "unl" ] ; then
+              echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz , output.lhe' >> $jdl
+              echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz ; output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl
+            else
+              echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+              echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+            fi
             echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
             echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
             echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
@@ -871,7 +992,7 @@ kill_lhe()
     esac
     if [ "$Site" == "cern" ] ; then
       $BJOBS | grep $taskID'_' | awk '{print $1}' | xargs -n 1 bkill 
-    elif [ "$Site" == "fnal" ] ; then
+    elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
       for itaskID in $taskID ; do
         condor_rm $itaskID
       done       
@@ -928,7 +1049,7 @@ add_lhejob()
              $BSUB -u $email -q $queue -o $WFWorkArea$Dataset"_"$taskID"_"$iJob.out -J $taskID"_"$iJob $submit $iJob
       done 
       echo $dir $lhe $taskID $nJobs $Site $SEEDOffset > $iLHEadd
-    elif [ "$Site" == "fnal" ] ; then
+    elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
       # New Start / Stop range
       iJobStart=$nJobs
       nJobs=`(expr $nJobs + $addjob )`
@@ -936,21 +1057,37 @@ add_lhejob()
       jdl=$WFWorkArea$requestID'.resub.jdl'
       cp /dev/null $jdl
       echo 'universe = vanilla'                               >> $jdl
-      echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
-      echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
-      echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+      if [ "$Site" == "fnal" ] ; then
+        echo '+DESIRED_Archs="INTEL,X86_64"'                    >> $jdl
+        echo '+DESIRED_Sites = "T1_US_FNAL"'                    >> $jdl
+        echo 'Requirements = stringListMember(GLIDEIN_CMSSite,DESIRED_Sites)&& stringListMember(Arch, DESIRED_Archs)'  >> $jdl
+      fi
       echo 'Executable = '$submit                             >> $jdl
       echo 'should_transfer_files = YES'                      >> $jdl
       echo 'when_to_transfer_output = ON_EXIT'                >> $jdl
-      echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+      if  [ "$Site" == "unl" ] ; then
+        #echo 'transfer_input_files = '$WFWorkArea$pyCfg','$WFWorkArea'CVSPatch.tgz'  >> $jdl
+        #echo 'transfer_input_files = '$WFWorkArea'TTJets_8TeV_madgraph_gridpack_cfg_for_workernode.py,'$WFWorkArea'TTJets_8TeV_madgraph_gridpack_cfg_for_workernode.py.pkl,'$WFWorkArea'CVSPatch.tgz'  >> $jdl
+          echo 'transfer_input_files = '$WFWorkArea$FRZpyCfg','$WFWorkArea$PKLpyCfg','$WFWorkArea'CVSPatch.tgz'  >> $jdl
+      else
+        echo 'transfer_input_files = '$WFWorkArea$pyCfg         >> $jdl
+      fi
       echo 'stream_error = false'                             >> $jdl
       echo 'stream_output = false'                            >> $jdl
       echo 'notification = NEVER'                             >> $jdl
       echo 'priority = 10'                                    >> $jdl
       echo ' '                                                >> $jdl
       for (( iJob=$iJobStart ; iJob<$nJobs ; ++iJob )) ; do 
-        echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
-        echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+        aSEED=`(expr $iJob + $SEEDOffset)`
+        if  [ "$Site" == "unl" ] ; then
+          #echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz , output.lhe' >> $jdl
+          #echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz ; output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl
+          echo 'transfer_output_files = output.lhe' >> $jdl
+          echo 'transfer_output_remaps = "output.lhe = '$eosDir'/'$Dataset'_'$aSEED'.lhe"' >> $jdl 
+        else
+          echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
+          echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
+        fi
         echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
         echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
         echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
@@ -1040,7 +1177,11 @@ sync_lhe()
       BaseDir=`pwd`'/'$dir
       LogDir=$BaseDir'/LogFiles_'$requestID'/'
       WFWorkArea=$WorkArea$requestID'/'
-      if [ "$runSite" == "fnal" ] ; then
+      if [ "$runSite" == "fnal" ] || [ "$runSite" == "unl" ] ; then
+        if  [ "$runSite" == "unl" ] ; then
+          fnalsrm=$unlsrm
+          fnaleos=$unleos
+        fi 
         lockFile=$WFWorkArea$requestID'.synclock'
         if [ -f $lockFile ] ; then
           echo '[LHEProd.sh::Submit] ERROR lockFile exist:' $lockFile
@@ -1166,7 +1307,7 @@ sync=0
 
 nJobMax=0
 iJobStart=1
-tarball=1
+tarball=0
 
 FindFailedJob=0
 
