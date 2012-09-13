@@ -187,15 +187,20 @@ parse_config()
   #echo $cfgline
 
   # Decode info
-  
+
+
   requestID=`(echo $cfgline | awk '{print $1}')`
   Release=`(echo $cfgline | awk '{print $2}' | awk -F'CMSSW_' '{print $2}')`
   Events=`(echo $cfgline | awk '{print $5}')`
   Dataset=`(echo $cfgline | awk '{print $10}')`
-  pyCfg=`(echo $cfgline | awk '{print $13}')`
-  eosnum=`(echo $cfgline | awk '{print $14}')`
-#  pyCfg=`(echo $cfgline | awk '{print $12}')`
-#:  eosnum=`(echo $cfgline | awk '{print $13}')`
+  nCfg=$(echo $cfgline | wc | awk '{print $2}')
+  if [ $nCfg -eq 14 ] ; then
+    pyCfg=`(echo $cfgline | awk '{print $13}')`
+    eosnum=`(echo $cfgline | awk '{print $14}')`
+  elif [ $nCfg -eq 13 ] ; then
+    pyCfg=`(echo $cfgline | awk '{print $12}')`
+    eosnum=`(echo $cfgline | awk '{print $13}')`
+  fi
   eosDir=$eosBase$eosnum
 
   FRZpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py"}')`
@@ -609,8 +614,8 @@ sta_lhe()
       nBadSeeds=0
     fi
     if [ "$Site" == "cern" ] ; then
-      lFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
-      nFiles=`(xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
+      lFiles=`(ssh lxplus xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | awk -F"/" '{print $NF}')`
+      nFiles=`(ssh lxplus xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep $Dataset | grep eos | awk '{print $5}' | wc | awk '{print $1}' )`
     elif [ "$Site" == "fnal" ] ; then
       lFiles=`(ssh $fnaluser@cmslpc-sl5 ls /eos/uscms/store/lhe/$eosnum 2> /dev/null)`
       nFiles=`(echo $lFiles | wc | awk '{print $2}' )`
