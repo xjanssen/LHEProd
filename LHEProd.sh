@@ -192,10 +192,10 @@ parse_config()
   Release=`(echo $cfgline | awk '{print $2}' | awk -F'CMSSW_' '{print $2}')`
   Events=`(echo $cfgline | awk '{print $5}')`
   Dataset=`(echo $cfgline | awk '{print $10}')`
-#  pyCfg=`(echo $cfgline | awk '{print $13}')`
-#  eosnum=`(echo $cfgline | awk '{print $14}')`
-  pyCfg=`(echo $cfgline | awk '{print $12}')`
-  eosnum=`(echo $cfgline | awk '{print $13}')`
+  pyCfg=`(echo $cfgline | awk '{print $13}')`
+  eosnum=`(echo $cfgline | awk '{print $14}')`
+#  pyCfg=`(echo $cfgline | awk '{print $12}')`
+#:  eosnum=`(echo $cfgline | awk '{print $13}')`
   eosDir=$eosBase$eosnum
 
   FRZpyCfg=`(echo $pyCfg | awk -F".py" '{print $1"_for_workernode.py"}')`
@@ -432,9 +432,12 @@ sub_lhe()
     fi
     echo 'stream_error = false'                             >> $jdl
     echo 'stream_output = false'                            >> $jdl
-    echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_$(process).out'  >> $jdl
-    echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_$(process).err'  >> $jdl
-    echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_$(process).log'  >> $jdl
+#    echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_$(process).out'  >> $jdl
+#    echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_$(process).err'  >> $jdl
+#    echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_$(process).log'  >> $jdl
+    echo 'Output = ' $Dataset'_$(cluster)_$(process).out'   >> $jdl
+    echo 'Error  = ' $Dataset'_$(cluster)_$(process).err'   >> $jdl
+    echo 'Log    = ' $Dataset'_$(cluster)_$(process).log'   >> $jdl 
     echo 'notification = NEVER'                             >> $jdl
     echo 'Arguments = $(process)'                           >> $jdl
     echo 'priority = 10'                                    >> $jdl
@@ -449,7 +452,9 @@ sub_lhe()
       echo 'Queue '$nJobs                                     >> $jdl
     fi
 
+    cd $BaseDir'/LogFiles_'$requestID
     res=`(condor_submit $jdl)`
+    cd -
     echo $res
     taskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's/ //g' )` 
     joblist=$BaseDir'/'$requestID'.'$taskID'.joblist'
@@ -551,7 +556,7 @@ sta_lhe()
 
 
   lheact=$lhein 
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
@@ -773,7 +778,7 @@ check_nevt()
   fi
 
   lheact=$lhein
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
@@ -843,7 +848,7 @@ resub_lhe()
   fi
 
   lheact=$lhein
-  activeLHErsb=`(find . | grep ".active")`
+  activeLHErsb=`(find . | grep "\.active")`
   for iLHErsb in $activeLHErsb ; do
     dir=`(cat $iLHErsb | awk '{print $1}')`
     lhe=`(cat $iLHErsb | awk '{print $2}')`
@@ -927,9 +932,9 @@ resub_lhe()
             echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
             echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
           fi
-          echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
-          echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
-          echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+          echo 'Output = ' $Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+          echo 'Error  = ' $Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+          echo 'Log    = ' $Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
           echo 'Arguments = '$iJob                                >> $jdl 
           echo 'Queue '                                           >> $jdl
           echo ' '                                                >> $jdl  
@@ -949,16 +954,18 @@ resub_lhe()
               echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
               echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
             fi
-            echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
-            echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
-            echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+            echo 'Output = ' $Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+            echo 'Error  = ' $Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+            echo 'Log    = ' $Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
             echo 'Arguments = '$iJob                                >> $jdl
             echo 'Queue '                                           >> $jdl
             echo ' '                                                >> $jdl
           done
         fi 
 
+        cd $BaseDir'/LogFiles_'$requestID
         res=`(condor_submit $jdl)`
+        cd -
         echo $res
         NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
         echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site $SEEDOffset > $iLHErsb
@@ -984,7 +991,7 @@ kill_lhe()
   fi
 
   lheact=$lhein
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHEkil in $activeLHE ; do
     lhe=`(cat $iLHEkil | awk '{print $2}')`
     runSite=`(cat $iLHEkil | awk '{print $5}')`
@@ -1030,7 +1037,7 @@ add_lhejob()
   fi 
 
   lheact=$lhein 
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHEadd in $activeLHE ; do
     lhe=`(cat $iLHEadd | awk '{print $2}')`
     runSite=`(cat $iLHEadd | awk '{print $5}')`
@@ -1046,6 +1053,7 @@ add_lhejob()
     taskID=`(cat $iLHEadd | awk '{print $3}')`
     OldtaskID=`(cat $iLHEadd | awk '{print $3}')`
     parse_config
+    BaseDir=`pwd`'/'$dir
     dir=`(cat $iLHEadd | awk '{print $1}')`
     nJobs=`(cat $iLHEadd | awk '{print $4}')`
     FirstSeedOffSet=`(cat $iLHEadd | awk '{print $6}')`
@@ -1104,14 +1112,17 @@ add_lhejob()
           echo 'transfer_output_files = '$Dataset'_'$iJob'.log.tgz' >> $jdl
           echo 'transfer_output_remaps = "'$Dataset'_'$iJob'.log.tgz = '$LogDir'/'$Dataset'_'$iJob'.log.tgz"' >> $jdl
         fi
-        echo 'Output = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
-        echo 'Error  = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
-        echo 'Log    = ' $WFWorkArea$Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
+        echo 'Output = ' $Dataset'_$(cluster)_'$iJob'.out'  >> $jdl
+        echo 'Error  = ' $Dataset'_$(cluster)_'$iJob'.err'  >> $jdl
+        echo 'Log    = ' $Dataset'_$(cluster)_'$iJob'.log'  >> $jdl
         echo 'Arguments = '$iJob                                >> $jdl
         echo 'Queue '                                           >> $jdl
         echo ' '                                                >> $jdl
       done 
+
+      cd $BaseDir'/LogFiles_'$requestID
       res=`(condor_submit $jdl)`
+      cd -
       echo $res
       NewtaskID=`(echo $res | awk -F'submitted to cluster' '{print $2}' | awk -F'.' '{print $1}' | sed 's: ::g' )`
       echo $dir $lhein $OldtaskID':'$NewtaskID $nJobs $Site $SEEDOffset > $iLHEadd
@@ -1131,7 +1142,7 @@ add_lhejob()
 clean_afs_log()
 {
   lheact=$lhein
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
     lhe=`(cat $iLHE | awk '{print $2}')`
@@ -1170,7 +1181,7 @@ sync_lhe()
   fi 
 
   lheact=$lhein
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   for iLHEsnc in $activeLHE ; do 
     dir=`(cat $iLHEsnc | awk '{print $1}')`
     lhe=`(cat $iLHEsnc | awk '{print $2}')`
@@ -1258,7 +1269,7 @@ close_lhe()
   fi
 
   # Find back jobs
-  activeLHE=`(find . | grep ".active")`
+  activeLHE=`(find . | grep "\.active")`
   Found=0
   for iLHE in $activeLHE ; do
     dir=`(cat $iLHE | awk '{print $1}')`
