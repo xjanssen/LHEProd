@@ -287,7 +287,7 @@ sub_lhe()
   BaseDir=`pwd`'/'$dir 
   lockFile=$BaseDir'/'$requestID'.lock'
   actiFile=$BaseDir'/'$requestID'.active'
-  echo $lockFile
+
   if [ -f $lockFile ] ; then
     echo '[LHEProd.sh::Submit] ERROR lockFile exist:' $lockFile
     exit
@@ -295,7 +295,9 @@ sub_lhe()
 
   if [ $EvtJob -lt 10000 ] ; then
     echo 
+    echo "---- WARNING ----"
     echo "---- WARNING ---- LESS THAN 10k events/job ---- CONFIRM WITH GEN BEFORE SUBMITTING -----"
+    echo "---- WARNING ----"
     echo
   fi
 
