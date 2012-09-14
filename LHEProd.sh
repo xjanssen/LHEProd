@@ -293,6 +293,12 @@ sub_lhe()
     exit
   fi
 
+  if [ $EvtJob -lt 10000 ] ; then
+    echo 
+    echo "---- WARNING ---- LESS THAN 10k events/job ---- CONFIRM WITH GEN BEFORE SUBMITTING -----"
+    echo
+  fi
+
   echo -en "[LHEProd::Submit] INFO : Do you want to submit this WorkFlow ? [y/n] "
   read a
   case $a in
