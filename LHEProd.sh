@@ -547,9 +547,9 @@ sta_lhe()
   echo "--------------------------------------------------------------------"
   if [ "$Site" == "cern" ] ; then
     nRunTot=`($BJOBS  | grep "RUN"  | wc | awk '{print $1}')`
-    nRunQDet=`($BJOBS  | grep "RUN"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    nRunQDet=`($BJOBS  | grep "RUN"  | awk '{print $4}' | sort | uniq -c | awk '{print $2":"$1}' )`
     nPendTot=`($BJOBS | grep "PEND" | wc | awk '{print $1}')`
-    nPendQDet=`($BJOBS  | grep "PEND"  | awk '{print $4}' | uniq -c | awk '{print $2":"$1}' )`
+    nPendQDet=`($BJOBS  | grep "PEND"  | awk '{print $4}' | sort | uniq -c |  awk '{print $2":"$1}' )`
     echo '   # Runing  Jobs : '$nRunTot ' ['$nRunQDet']'
     echo '   # Pending Jobs : '$nPendTot ' ['$nPendQDet']'
     nSync=`($BJOBS  | grep "Sync" | wc | awk '{print $1}')`
