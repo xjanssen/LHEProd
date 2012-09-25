@@ -505,7 +505,7 @@ extsub_lhe()
     exit
   fi
 
-  if [ "$extsub" == "fnal" ] ; then
+  if [ "$extsub" == "fnal" ] || [ "$extsub" == "unl" ]  ; then
     PWD=`pwd`
     BaseDir=`pwd`'/'$dir
     lockFile=$BaseDir'/'$requestID'.lock'
@@ -1253,6 +1253,16 @@ sync_lhe()
           exit
         fi
 
+        cFiles=$WFWorkArea$requestID'.cFiles'
+        xrd eoscms dirlist /eos/cms/store/lhe/'$eosnum' | grep -v " 0 " | grep $Dataset | grep eos | awk -F"/" '{print $NF}' > $cFiles
+        wc $cFiles
+
+        rFiles=$WFWorkArea$requestID'.rFiles'
+        srmls $fnalsrm$fnaleos'/'$eosnum | grep -v -f $cFiles | grep $Dataset | awk '{print $2":"$1}' | grep -v ":0" > $rFiles
+        wc $rFiles
+        split -200 $rFiles $rFiles.split.
+        wc $rFiles.split.*
+
         voms-proxy-init -cert $globusDir/usercert.pem -key $globusDir/userkey.pem -valid 168:00 
         certfull=`(voms-proxy-info | grep path | awk -F":" '{print $2}' | sed 's: ::g')`
         certshort=`(echo $certfull | awk -F"/" '{print $NF}')`
@@ -1263,8 +1273,9 @@ sync_lhe()
         echo '#!/bin/sh'                                          >> $syncJob
         echo ' '                                                  >> $syncJob 
         echo 'PWD=`pwd`'                                          >> $syncJob  
-        echo 'mv '$WFWorkArea$certshort' /tmp/'$certshort         >> $syncJob
-        echo 'srmls '$fnalsrm$fnaleos'/'$eosnum' | grep '$Dataset '| awk '\''{print $2":"$1}'\' ' > rFiles '  >> $syncJob
+        echo 'mv '$WFWorkArea$certshort'.$1 /tmp/'$certshort         >> $syncJob
+        #echo 'srmls '$fnalsrm$fnaleos'/'$eosnum' | grep '$Dataset '| awk '\''{print $2":"$1}'\' ' > rFiles '  >> $syncJob
+        echo 'mv ' $rFiles'.split.$1 rFiles'                                       >> $syncJob
         echo 'echo "Remote Files : " `(wc rFiles)` '              >> $syncJob
 #       echo 'xrd eoscms dirlist /eos/cms/store/lhe/'$eosnum' | grep '$Dataset' | grep eos | awk '\''{print $5":"$2}'\'' > lFiles'  >> $syncJob
         echo 'for irFile in `(cat rFiles)` ; do'                  >> $syncJob
@@ -1283,11 +1294,15 @@ sync_lhe()
         echo '  fi'                                               >> $syncJob 
         echo 'done'                                               >> $syncJob
         echo 'rm /tmp/'$certshort                                 >> $syncJob
-        echo 'rm '$lockFile                                       >> $syncJob
+        #echo 'rm '$lockFile                                       >> $syncJob
         
         chmod +x $syncJob
-        echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out -J Sync$taskID $syncJob
-        $BSUB -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset"_"sync.out -J Sync$taskID $syncJob
+        for irF in `ls $rFiles.split.* | awk -F"\." '{print $NF}'` ; do
+          cp $WFWorkArea$certshort $WFWorkArea$certshort.$irF
+          echo bsub -u $email -q 1nd -o $WFWorkArea$Dataset'_'sync.out.$irF -J Sync$taskID $syncJob $irF
+          $BSUB -sp 70 -u $email -q $queue -o $WFWorkArea$Dataset"_"sync.out.$irF -J Sync$taskID $syncJob $irF
+        done 
+        rm $WFWorkArea$certshort  
         touch $lockFile
       else
         echo '[LHEProd::Sync] ERROR: Unknown External Site : '$extsub
