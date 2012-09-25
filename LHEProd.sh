@@ -1254,7 +1254,7 @@ sync_lhe()
         fi
 
         cFiles=$WFWorkArea$requestID'.cFiles'
-        xrd eoscms dirlist /eos/cms/store/lhe/'$eosnum' | grep -v " 0 " | grep $Dataset | grep eos | awk -F"/" '{print $NF}' > $cFiles
+        xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep -v " 0 " | grep $Dataset | grep eos | awk -F"/" '{print $NF}' > $cFiles
         wc $cFiles
 
         rFiles=$WFWorkArea$requestID'.rFiles'
