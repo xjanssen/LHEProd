@@ -558,9 +558,19 @@ sta_lhe()
     echo '   # Sync    Jobs : '$nSync ' [ Running : '$nSyncR' / Pending : '$nSyncP' ]'
   elif [ "$Site" == "fnal" ] || [ "$Site" == "unl" ] ; then
     nRunTot=`(condor_q | grep "$luser" | awk '{print $6}' | grep "R" | wc | awk '{print $1}')`
+    if [ "$Site" == "unl" ] ; then
+      nRunTotNebraska=`(condor_q -run | grep -v glidein | grep "$luser" | awk '{print $6}' | wc | awk '{print $1}')`
+      nRunTotOmaha=`(condor_q -run | grep    glidein | grep "$luser" | awk '{print $6}' | wc | awk '{print $1}')`
+    fi 
     nPendTot=`(condor_q | grep "$luser" | awk '{print $6}' | grep "I" | wc | awk '{print $1}')`
-    echo '   # Runing  Jobs : '$nRunTot 
+    nHoldTot=`(condor_q | grep "$luser" | awk '{print $6}' | grep "H" | wc | awk '{print $1}')`
+    if [ "$Site" == "unl" ] ; then
+      echo '   # Runing  Jobs : '$nRunTot' [ T2_US_Nebraska : '$nRunTotNebraska' T3_US_Omaha : '$nRunTotOmaha' ]'
+    else
+      echo '   # Runing  Jobs : '$nRunTot 
+    fi
     echo '   # Pending Jobs : '$nPendTot 
+    echo '   # Holded  Jobs : '$nHoldTot 
   else
     exit
   fi
@@ -595,6 +605,8 @@ sta_lhe()
     lJobs=""
     nRun=0
     nPend=0 
+    nRunNebraska=0
+    nRunOmaha=0
     if [ "$Site" == "cern" ] && [ "$runSite" == "cern" ] ; then
       lJobs=`($BJOBS | grep $taskID'_' | grep "RUN" | awk '{print $7}' | awk -F "_" '{print $2}')`
       lJobs=$lJobs' '`($BJOBS | grep $taskID'_' | grep "PEND" | awk '{print $6}' | awk -F "_" '{print $2}')`
@@ -602,16 +614,29 @@ sta_lhe()
       nPend=`($BJOBS | grep $taskID'_' | grep "PEND" | wc | awk '{print $1}')`
     elif ( [ "$Site" == "fnal" ] && [ "$runSite" == "fnal" ] ) || ( [ "$Site" == "unl" ] && [ "$runSite" == "unl" ] ) ; then
       for itaskID in $taskID ; do
-        lJobsTmp=`(condor_q | grep $luser | awk '{print $1}' | grep "$itaskID\." | awk '{print $1}' )`
+        lJobsTmp=`(condor_q | grep $luser | awk '{print $1}' | grep "$itaskID\." | awk -F"." '{print $2}' )`
         nRunTmp=`(condor_q  | grep $luser | grep " R " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
         nPendTmp=`(condor_q | grep $luser | grep " I " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
+        if [ "$Site" == "unl" ] && [ "$runSite" == "unl" ] ; then
+          nRunTmpOmaha=`(condor_q -run | grep glidein | grep $luser | grep " R " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
+          nRunTmpNebraska=`(condor_q -run | grep -v glidein | grep $luser | grep " R " | awk '{print $1}' | awk -F"." '{print $1}' | grep "$itaskID" | wc | awk '{print $1}')`
+        fi
         joblist=$dir'/'$lhein'.'$itaskID'.joblist'
+        #echo $lJobsTmp
         for ilJobsTmp in $lJobsTmp  ; do
-          lJobs=$lJobs' '`(grep $ilJobsTmp $joblist | awk '{print $2}')`    
+          #echo $ilJobsTmp
+          #grep "$itaskID\.$ilJobsTmp " $joblist
+          lJobs=$lJobs' '`(grep "$itaskID\.$ilJobsTmp " $joblist | awk '{print $2}')`    
         done
         nRun=`(expr $nRun + $nRunTmp)`
         nPend=`(expr $nPend + $nPendTmp)`
+        if [ "$Site" == "unl" ] && [ "$runSite" == "unl" ] ; then
+          nRunNebraska=`(expr $nRunNebraska + $nRunTmpNebraska)`
+          nRunOmaha=`(expr $nRunOmaha + $nRunTmpOmaha)`
+        fi 
       done
+      #echo $lJobs | wc
+
     fi
     parse_config 
     BaseDir=`pwd`'/'$dir
@@ -683,14 +708,14 @@ sta_lhe()
 
        filjoblist=`(mktemp)`    
        for iFile in $lFiles ; do  
-#        echo $iFile
+         #echo $iFile
          SEED=`(echo $iFile | awk -F'_' '{print $NF}' | awk -F'.' '{print $1}')`
-#        echo $SEED
+         #echo $SEED
          iJob=`(expr $SEED - $SEEDOffset)`
-#        echo $iJob
+         #echo $iJob
          echo $iJob >> $filjoblist     
        done 
-#      echo $SEEDOffset
+       #echo $SEEDOffset
        filjoblists=`(mktemp)`
        sort -n $filjoblist >> $filjoblists
       
