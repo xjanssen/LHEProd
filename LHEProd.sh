@@ -862,7 +862,7 @@ check_nevt()
     echo '  echo " ---> MISSING EVENTS !!!!" >> $logFile'     >> $submit
     echo 'fi'                                                 >> $submit 
     echo ' '                                                  >> $submit
-    echo 'mail '$email',arnaud.pin@cern.ch -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
+    echo 'mail '$email',Sten.Luyckx@cern.ch -s '$requestID'_Check_NumEvt < $logFile'    >> $submit 
     echo 'scp -o StrictHostKeyChecking=no $logFile '$subHOST':'$LogDir  >> $submit
    
     echo '... Running file check in bkgd ... you will receive an email ...' 
@@ -1253,6 +1253,11 @@ sync_lhe()
           exit
         fi
 
+        #voms-proxy-init -cert $globusDir/usercert.pem -key $globusDir/userkey.pem -valid 168:00 
+        certfull=`(voms-proxy-info | grep path | awk -F":" '{print $2}' | sed 's: ::g')`
+        certshort=`(echo $certfull | awk -F"/" '{print $NF}')`
+        cp $certfull $WFWorkArea
+
         cFiles=$WFWorkArea$requestID'.cFiles'
         xrd eoscms dirlist /eos/cms/store/lhe/$eosnum | grep -v " 0 " | grep $Dataset | grep eos | awk -F"/" '{print $NF}' > $cFiles
         wc $cFiles
@@ -1262,11 +1267,6 @@ sync_lhe()
         wc $rFiles
         split -200 $rFiles $rFiles.split.
         wc $rFiles.split.*
-
-        voms-proxy-init -cert $globusDir/usercert.pem -key $globusDir/userkey.pem -valid 168:00 
-        certfull=`(voms-proxy-info | grep path | awk -F":" '{print $2}' | sed 's: ::g')`
-        certshort=`(echo $certfull | awk -F"/" '{print $NF}')`
-        cp $certfull $WFWorkArea
  
         syncJob=$WFWorkArea$requestID'.sync'
         cp /dev/null $syncJob
